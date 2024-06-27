@@ -4,21 +4,38 @@
 #include <iostream>
 #include "Coroutine.h"
 #include <string>
+#include <windows.h>
+
+#undef CreateSemaphore
 
 extern void         PrintMemory(void);
 Coroutine_Semaphore sem1;
+Coroutine_Mailbox   mail1;
+
+static uint64_t Task1_func1(Coroutine_Handle coroutine, uint32_t timeout)
+{
+    uint64_t ts = Coroutine.GetMillisecond();
+    Coroutine.YieldDelay(coroutine, 1000);
+    ts = Coroutine.GetMillisecond() - ts;
+    return ts;
+}
 
 void Task1(Coroutine_Handle coroutine, void *obj)
 {
-    int i = 0;
+    int   i       = 0;
+    char *str_buf = new char[4 * 1024];
     while (true) {
         PrintMemory();
         std::string str = "hello";
-        uint64_t    ts  = Coroutine.GetMillisecond();
-        Coroutine.YieldDelay(coroutine, 1000);
-        ts = Coroutine.GetMillisecond() - ts;
+        uint64_t    ts  = Task1_func1(coroutine, 1000);
         str += std::to_string(i);
         printf("[%llu][1][%llu]i = %d %s\n", Coroutine.GetMillisecond(), ts, i++, str.c_str());
+        Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str.c_str(), str.size(), 10);
+        if (!Coroutine.SendMail(mail1, data))
+            Coroutine.DeleteMessage(data);
+        Sleep(10);
+        Coroutine.PrintInfo(str_buf, 4 * 1024);
+        printf("%s", str_buf);
     }
     return;
 }
@@ -29,12 +46,13 @@ void Task2(Coroutine_Handle coroutine, void *obj)
     printf("start: %llx", Coroutine.GetMillisecond());
     while (true) {
         std::string str = "hello";
-        uint64_t ts = Coroutine.GetMillisecond();
+        uint64_t    ts  = Coroutine.GetMillisecond();
         Coroutine.YieldDelay(coroutine, 500);
         ts = Coroutine.GetMillisecond() - ts;
         str += std::to_string(i);
-        printf("[%llu][2][%llu]i = %d %s\n",Coroutine.GetMillisecond(),ts , i++,str.c_str());
-         Coroutine.GiveSemaphore(sem1, 1);
+        printf("[%llu][2][%llu]i = %d %s\n", Coroutine.GetMillisecond(), ts, i++, str.c_str());
+        Coroutine.GiveSemaphore(sem1, 1);
+        Sleep(2);
     }
     return;
 }
@@ -45,6 +63,24 @@ void Task3(Coroutine_Handle coroutine, void *obj)
         if (!Coroutine.WaitSemaphore(coroutine, sem1, 1, 100))
             continue;
         printf("[%llu][3]sem1 signal\n", Coroutine.GetMillisecond());
+        Sleep(1);
+    }
+    return;
+}
+
+void Task4(Coroutine_Handle coroutine, void *obj)
+{
+    while (true) {
+        Coroutine.YieldDelay(coroutine, 500);
+        auto data = Coroutine.ReceiveMail(coroutine, mail1, 0xFF, 100);
+        if (data == NULL) continue;
+        printf("[%llu][4]mail1 recv: %llu %.*s\n",
+               Coroutine.GetMillisecond(),
+               data->eventId,
+               data->size,
+               (char *)data->data);
+        Coroutine.DeleteMessage(data);
+        Sleep(2);
     }
     return;
 }
@@ -57,18 +93,23 @@ int main()
     auto                           events = GetEvents();
     Coroutine.SetInter(inter);
 
-    Coroutine_Handle coroutine = Coroutine.Create(events);
+    Coroutine_Handle coroutine  = Coroutine.Create("c1", events);
+    Coroutine_Handle coroutine2 = Coroutine.Create("c2", events);
 
-    sem1 = Coroutine.CreateSemaphore(0);
+    sem1  = Coroutine.CreateSemaphore("sem1", 0);
+    mail1 = Coroutine.CreateMailbox("mail1", 1024);
 
-    Coroutine.AddTask(coroutine, Task1, nullptr);
-    Coroutine.AddTask(coroutine, Task2, nullptr);
-     Coroutine.AddTask(coroutine, Task3, nullptr);
+    Coroutine.AddTask(coroutine, Task1, nullptr, "Task1");
+    Coroutine.AddTask(coroutine, Task2, nullptr, "Task2");
+    Coroutine.AddTask(coroutine2, Task3, nullptr, "Task3");
+    Coroutine.AddTask(coroutine2, Task4, nullptr, "Task4");
 
-    volatile void* ptr = &coroutine;
+    volatile void *ptr = &coroutine;
     printf("%p\n", ptr);
-    while (true)
+    while (true) {
         Coroutine.RunTick(coroutine);
+        Coroutine.RunTick(coroutine2);
+    }
     return 0;
 }
 

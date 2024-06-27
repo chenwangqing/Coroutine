@@ -2,7 +2,7 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.12
+ * @version  1.13
  * @date     2022-08-15
  *
  * @copyright Copyright (c) 2022  Four-Faith
@@ -23,6 +23,7 @@
  * <tr><td>2022-09-14 <td>1.10    <td>CXS    <td>添加唤醒事件
  * <tr><td>2022-09-19 <td>1.11    <td>CXS    <td>添加默认事件
  * <tr><td>2024-06-26 <td>1.12    <td>CXS    <td>添加Coroutine_Inter
+ * <tr><td>2024-06-27 <td>1.13    <td>CXS    <td>修正一些任务切换的错误；添加邮箱通信
  * </table>
  *
  * @note
@@ -39,9 +40,10 @@ while (CoroutineEx.RunTick(coroutine))
 // 删除协程
 CoroutineEx.Delete(coroutine);
 
-优化等级不能大于 O1
-
- */
+!!!!!!!!!!!!! 注意 !!!!!!!!!!!!!
+1. 禁止将局部变量跨任务使用，因为是共享栈，切换不同任务就会改变栈上的内容
+2. 不要在栈上分配一个很大的局部变量，这个会导致任务切换时间变长
+*/
 #ifndef __Coroutine_H__
 #define __Coroutine_H__
 #include <stdbool.h>
@@ -129,11 +131,11 @@ typedef struct
  */
 typedef struct _C_MailData
 {
-    uint64_t            expiration_time;   // 过期时间
-    uint64_t            eventId;           // 事件id
-    size_t              size;              // 消息长度
-    void *              data;              // 消息数据
-    CM_NodeLink_t       link;// _C_MailData
+    uint64_t      expiration_time;   // 过期时间
+    uint64_t      eventId;           // 事件id
+    size_t        size;              // 消息长度
+    void *        data;              // 消息数据
+    CM_NodeLink_t link;              // _C_MailData
 } Coroutine_MailData;
 
 typedef struct
@@ -148,12 +150,13 @@ typedef struct
 
     /**
    * @brief    【外部使用】创建协程
+   * @param    name           名称 31 字节
    * @param    events         事件
    * @return   Coroutine_Handle    NULL 表示创建失败
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-15
    */
-    Coroutine_Handle (*Create)(const Coroutine_Events *events);
+    Coroutine_Handle (*Create)(const char *name, const Coroutine_Events *events);
 
     /**
    * @brief    【外部使用】删除协程
@@ -168,11 +171,12 @@ typedef struct
    * @param    c              协程实例
    * @param    func           执行函数
    * @param    pars           执行参数
+   * @param    name           任务名称 最大31字节
    * @return   int            协程id NULL：创建失败
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-15
    */
-    Coroutine_TaskId (*AddTask)(Coroutine_Handle c, Coroutine_Task func, void *pars);
+    Coroutine_TaskId (*AddTask)(Coroutine_Handle c, Coroutine_Task func, void *pars, const char *name);
 
     /**
    * @brief    获取当前任务id
@@ -246,11 +250,12 @@ typedef struct
 
     /**
      * @brief    创建邮箱
+     * @param    name                邮箱名称 最大31字节
      * @param    msg_max_size        邮箱信息最大长度
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-26
      */
-    Coroutine_Mailbox (*CreateMailbox)(uint32_t msg_max_size);
+    Coroutine_Mailbox (*CreateMailbox)(const char *name, uint32_t msg_max_size);
 
     /**
      * @brief    删除邮箱
@@ -284,14 +289,13 @@ typedef struct
 
     /**
    * @brief    显示协程信息
-   * @param    c              协程实例
    * @param    buf            缓存
    * @param    max_size       缓存大小
    * @return   int            实际大小
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-16
    */
-    int (*PrintInfo)(Coroutine_Handle c, char *buf, int max_size);
+    int (*PrintInfo)(char *buf, int max_size);
 
     /**
    * @brief    【内部使用】结束任务(不能再协程外使用)
@@ -303,12 +307,13 @@ typedef struct
 
     /**
    * @brief    创建信号量
+   * @param    name           名称 最大31字节
    * @param    init_val       初始值
    * @return   Coroutine_Semaphore
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-17
    */
-    Coroutine_Semaphore (*CreateSemaphore)(uint32_t init_val);
+    Coroutine_Semaphore (*CreateSemaphore)(const char *name, uint32_t init_val);
 
     /**
    * @brief    删除信号量
@@ -345,15 +350,6 @@ typedef struct
                           uint32_t            timeout);
 
     /**
-   * @brief    设置名称
-   * @param    taskId         任务id
-   * @param    name           名称
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-09-09
-   */
-    void (*SetName)(Coroutine_TaskId taskId, const char *name);
-
-    /**
    * @brief    获取毫秒值
    * @param    c              协程实例
    * @return   const Coroutine_Events*
@@ -368,9 +364,9 @@ typedef struct
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-09-19
    */
-    void *(*Malloc)(size_t           size,
-                    const char *     file,
-                    int              line);
+    void *(*Malloc)(size_t      size,
+                    const char *file,
+                    int         line);
 
     /**
    * @brief    内存释放
@@ -379,9 +375,18 @@ typedef struct
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-09-19
    */
-    void (*Free)(void *           ptr,
-                 const char *     file,
-                 int              line);
+    void (*Free)(void *      ptr,
+                 const char *file,
+                 int         line);
+
+    /**
+     * @brief    获取任务名称
+     * @param    taskId         
+     * @return   const char*    
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-27
+     */
+    const char *(*GetTaskName)(Coroutine_TaskId taskId);
 } _Coroutine;
 
 /**
