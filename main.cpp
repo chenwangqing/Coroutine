@@ -18,7 +18,7 @@ void Task1(Coroutine_Handle coroutine, void *obj)
         Coroutine.YieldDelay(coroutine, 1000);
         ts = Coroutine.GetMillisecond() - ts;
         str += std::to_string(i);
-        printf("[1][%llu]i = %d %s\n", ts, i++, str.c_str());
+        printf("[%llu][1][%llu]i = %d %s\n", Coroutine.GetMillisecond(), ts, i++, str.c_str());
     }
     return;
 }
@@ -26,11 +26,15 @@ void Task1(Coroutine_Handle coroutine, void *obj)
 void Task2(Coroutine_Handle coroutine, void *obj)
 {
     int i = 0;
+    printf("start: %llx", Coroutine.GetMillisecond());
     while (true) {
+        std::string str = "hello";
         uint64_t ts = Coroutine.GetMillisecond();
         Coroutine.YieldDelay(coroutine, 500);
-        printf("[2][%llu]i = %d\n", Coroutine.GetMillisecond() - ts, i++);
-        Coroutine.GiveSemaphore(sem1, 1);
+        ts = Coroutine.GetMillisecond() - ts;
+        str += std::to_string(i);
+        printf("[%llu][2][%llu]i = %d %s\n",Coroutine.GetMillisecond(),ts , i++,str.c_str());
+         Coroutine.GiveSemaphore(sem1, 1);
     }
     return;
 }
@@ -40,7 +44,7 @@ void Task3(Coroutine_Handle coroutine, void *obj)
     while (true) {
         if (!Coroutine.WaitSemaphore(coroutine, sem1, 1, 100))
             continue;
-        printf("[3]sem1 signal\n");
+        printf("[%llu][3]sem1 signal\n", Coroutine.GetMillisecond());
     }
     return;
 }
@@ -57,10 +61,12 @@ int main()
 
     sem1 = Coroutine.CreateSemaphore(0);
 
-    Coroutine.AddTask(coroutine, Task1, nullptr);
+   Coroutine.AddTask(coroutine, Task1, nullptr);
     Coroutine.AddTask(coroutine, Task2, nullptr);
     Coroutine.AddTask(coroutine, Task3, nullptr);
 
+    volatile void* ptr = &coroutine;
+    printf("%p\n", ptr);
     while (true)
         Coroutine.RunTick(coroutine);
     return 0;

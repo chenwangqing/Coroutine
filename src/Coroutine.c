@@ -36,6 +36,7 @@ static int setjmp(jmp_buf buf)
         mov dword ptr[eax + 20], ecx   // 保存 setjmp 下一个地址
         mov eax, 0   // 默认返回 0
     }
+    return;
 }
 
 /**
@@ -58,8 +59,13 @@ static void longjmp(jmp_buf buf, int val)
         mov ebx, dword ptr[ebx + 0]
         jmp ecx
     }
+    return;
 }
+
 #endif
+
+typedef int (*func_setjmp_t)(jmp_buf buf);
+typedef void (*func_longjmp_t)(jmp_buf buf, int val);
 
 // --------------------------------------------------------------------------------------
 //                              |       应用        |
@@ -289,6 +295,33 @@ static void rubbishRecycling(CO_Thread *coroutine, CO_TCB *n, uint64_t ts)
     return;
 }
 
+static void _enter_into(CO_TCB *n)
+{
+    volatile int __stack = 0x44332211;
+    // 获取栈起始指针
+    if (n->coroutine->stack == NULL)
+        n->coroutine->stack = (int *)&__stack;   // 不能在后面创建局部变量
+    else if (n->coroutine->stack != (int *)&__stack)
+        return;   // 栈错误,栈被迁移
+    // 保存环境
+    volatile static func_setjmp_t _c_setjmp = setjmp;   // 防止setjmp内联
+    int                           ret       = _c_setjmp(n->coroutine->env);
+    if (ret == 0) {
+        if (n->isFirst) {
+            // 设置已运行标志
+            n->isFirst = false;
+            // 第一次运行
+            n->func(n->coroutine, n->obj);
+            // 设置删除标志
+            n->isDel = true;
+        } else {
+            // 回到 SaveStack.setjmp
+            longjmp(n->env, ((size_t)n - (size_t)__C_NODE));
+        }
+    }
+    return;
+}
+
 /**
  * @brief    协程任务
  * @param    obj
@@ -297,16 +330,10 @@ static void rubbishRecycling(CO_Thread *coroutine, CO_TCB *n, uint64_t ts)
  */
 static void _Task(CO_Thread *coroutine)
 {
-    CO_TCB *          n       = NULL;
-    uint64_t          min_ts  = UINT64_MAX;
-    volatile uint64_t ts      = Inter.GetMillisecond();
-    volatile bool     isHead  = coroutine->next_task == NULL;
-    volatile int      __stack = 0x44332211;
-    // 获取栈起始指针
-    if (coroutine->stack == NULL)
-        coroutine->stack = (int *)&__stack;   // 不能在后面创建局部变量
-    else if (coroutine->stack != (int *)&__stack)
-        return;   // 栈错误,栈被迁移
+    volatile CO_TCB * n      = NULL;
+    volatile uint64_t min_ts = UINT64_MAX;
+    volatile uint64_t ts     = Inter.GetMillisecond();
+    volatile bool     isHead = coroutine->next_task == NULL;
     // 获取下一个任务
     CO_Lock();
     rubbishRecycling(coroutine, n, ts);
@@ -320,20 +347,7 @@ static void _Task(CO_Thread *coroutine)
             coroutine->events.Idle(coroutine, sleep_time, coroutine->events.object);
         return;
     }
-    // 保存环境
-    if (setjmp(coroutine->env) == 0) {
-        if (n->isFirst) {
-            // 设置已运行标志
-            n->isFirst = false;
-            // 第一次运行
-            n->func(n->coroutine, n->obj);
-            // 设置删除标志
-            n->isDel = true;
-        } else {
-            // 回到 setjmp
-            longjmp(n->env, ((size_t)n - (size_t)__C_NODE));
-        }
-    }
+    _enter_into(n);
     // 记录运行时间
     ts = Inter.GetMillisecond() - ts;
     coroutine->run_time += ts;
@@ -346,56 +360,46 @@ static void _Task(CO_Thread *coroutine)
 }
 
 /**
- * @brief    保存堆栈
+ * @brief    上下文切换
  * @param    coroutine
  * @param    timeout
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2022-08-31
  */
-static void SaveStack(CO_Thread *coroutine, uint32_t timeout)
+static void ContextWwitch(volatile CO_TCB *n)
 {
-    int     __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
-    CO_TCB *n     = coroutine->idx_task;
-    if (timeout > 0)
-        n->execv_time = Inter.GetMillisecond() + timeout;
-    else
-        n->execv_time = 0;
-    n->timeout = timeout;
+    volatile int __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
     // 保存栈数据
-    n->p_stack   = (int *)&__mem - 1;   // 获取栈结尾
-    n->stack_len = coroutine->stack - n->p_stack;
+    n->p_stack   = (int *)&__mem - 4;   // 获取栈结尾
+    n->stack_len = n->coroutine->stack - n->p_stack;
     if (n->stack_len > n->stack_max) {
         if (n->stack != NULL)
             Inter.Free(n->stack, __FILE__, __LINE__);
-        n->stack     = (int *)Inter.Malloc(n->stack_len * sizeof(int), __FILE__, __LINE__);
-        n->stack_max = n->stack_len;
+        n->stack_max = ALIGN(n->stack_len, 128) * 128;
+        n->stack = (int*)Inter.Malloc(n->stack_max * sizeof(int), __FILE__, __LINE__);
     }
     if (n->stack == NULL) {
         // 内存分配错误
         n->isDel = true;
-        if (coroutine->events.Allocation != NULL)
-            coroutine->events.Allocation(coroutine, __LINE__, n->stack_len, coroutine->events.object);
+        if (n->coroutine->events.Allocation != NULL)
+            n->coroutine->events.Allocation(n->coroutine,
+                                            __LINE__,
+                                            n->stack_len,
+                                            n->coroutine->events.object);
     } else
         memcpy((char *)n->stack, (char *)n->p_stack, n->stack_len * sizeof(int));
-    // 回到调度器
-    longjmp(coroutine->env, 1);
-    return;
-}
-
-/**
- * @brief    加载堆栈
- * @param    r
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-31
- */
-static void LoadStack(CO_TCB *r)
-{
+    volatile static func_setjmp_t _c_setjmp = setjmp;
+    // 保存环境,回到调度器
+     int ret = _c_setjmp(n->env);
+     if (ret == 0)
+         longjmp(n->coroutine->env, 1);
+     n = (CO_TCB*)((size_t)ret + (size_t)__C_NODE);
     // 恢复堆栈内容
-    r->p = r->p_stack + r->stack_len - 1;
-    r->s = r->stack + r->stack_len - 1;
-    while (r->s >= r->stack &&                            // 限制范围
-           (size_t)r->p >= (size_t)&r + sizeof(size_t))   // 避免覆盖变量 r
-        *(r->p)-- = *(r->s)--;
+    n->p = n->p_stack + n->stack_len - 1;
+    n->s = n->stack + n->stack_len - 1;
+    while (n->s >= n->stack &&                            // 限制范围
+           (size_t)n->p >= (size_t)&n + sizeof(size_t))   // 避免覆盖变量 r
+        *(n->p)-- = *(n->s)--;
     return;
 }
 
@@ -411,15 +415,13 @@ static void _Yield(CO_Thread *coroutine, uint32_t timeout)
     CO_TCB *n = coroutine->idx_task;
     if (n == NULL)
         return;
-    // 保存环境
-    int ret = setjmp(n->env);
-    if (ret == 0) {
-        // 保存堆栈数据
-        SaveStack(coroutine, timeout);
-    } else {
-        // 加载堆栈数据
-        LoadStack((CO_TCB *)((size_t)ret + (size_t)__C_NODE));
-    }
+    if (timeout > 0)
+        n->execv_time = Inter.GetMillisecond() + timeout;
+    else
+        n->execv_time = 0;
+    n->timeout = timeout;
+    // 保存堆栈数据
+    ContextWwitch(n);
     return;
 }
 
@@ -504,6 +506,8 @@ static Coroutine_TaskId AddTask(Coroutine_Handle c,
     n->isRun     = true;
     n->isFirst   = true;
     n->next      = NULL;
+    n->stack = (int*)Inter.Malloc( 128 * sizeof(int), __FILE__, __LINE__);// 预分配 512 字节
+    n->stack_max = 0;
     if (isEx) CO_Lock();
     if (coroutine->tasks == NULL)
         coroutine->tasks = n;
