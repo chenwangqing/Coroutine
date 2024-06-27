@@ -375,8 +375,8 @@ static void ContextWwitch(volatile CO_TCB *n)
     if (n->stack_len > n->stack_max) {
         if (n->stack != NULL)
             Inter.Free(n->stack, __FILE__, __LINE__);
-        n->stack_max = ALIGN(n->stack_len, 128) * 128;
-        n->stack = (int*)Inter.Malloc(n->stack_max * sizeof(int), __FILE__, __LINE__);
+        n->stack_max = ALIGN(n->stack_len, 128) * 128;   // 按512字节分配，避免内存碎片
+        n->stack     = (int *)Inter.Malloc(n->stack_max * sizeof(int), __FILE__, __LINE__);
     }
     if (n->stack == NULL) {
         // 内存分配错误
@@ -390,15 +390,14 @@ static void ContextWwitch(volatile CO_TCB *n)
         memcpy((char *)n->stack, (char *)n->p_stack, n->stack_len * sizeof(int));
     volatile static func_setjmp_t _c_setjmp = setjmp;
     // 保存环境,回到调度器
-     int ret = _c_setjmp(n->env);
-     if (ret == 0)
-         longjmp(n->coroutine->env, 1);
-     n = (CO_TCB*)((size_t)ret + (size_t)__C_NODE);
+    int ret = _c_setjmp(n->env);
+    if (ret == 0)
+        longjmp(n->coroutine->env, 1);
+    n = (CO_TCB *)((size_t)ret + (size_t)__C_NODE);
     // 恢复堆栈内容
     n->p = n->p_stack + n->stack_len - 1;
     n->s = n->stack + n->stack_len - 1;
-    while (n->s >= n->stack &&                            // 限制范围
-           (size_t)n->p >= (size_t)&n + sizeof(size_t))   // 避免覆盖变量 r
+    while (n->s >= n->stack)   // 限制范围
         *(n->p)-- = *(n->s)--;
     return;
 }
@@ -506,8 +505,8 @@ static Coroutine_TaskId AddTask(Coroutine_Handle c,
     n->isRun     = true;
     n->isFirst   = true;
     n->next      = NULL;
-    n->stack = (int*)Inter.Malloc( 128 * sizeof(int), __FILE__, __LINE__);// 预分配 512 字节
-    n->stack_max = 0;
+    n->stack     = (int *)Inter.Malloc(128 * sizeof(int), __FILE__, __LINE__);   // 预分配 512 字节
+    n->stack_max = 128;
     if (isEx) CO_Lock();
     if (coroutine->tasks == NULL)
         coroutine->tasks = n;

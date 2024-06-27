@@ -61,9 +61,9 @@ int main()
 
     sem1 = Coroutine.CreateSemaphore(0);
 
-   Coroutine.AddTask(coroutine, Task1, nullptr);
+    Coroutine.AddTask(coroutine, Task1, nullptr);
     Coroutine.AddTask(coroutine, Task2, nullptr);
-    Coroutine.AddTask(coroutine, Task3, nullptr);
+     Coroutine.AddTask(coroutine, Task3, nullptr);
 
     volatile void* ptr = &coroutine;
     printf("%p\n", ptr);
