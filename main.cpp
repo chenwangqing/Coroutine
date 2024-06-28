@@ -12,25 +12,25 @@ extern void         PrintMemory(void);
 Coroutine_Semaphore sem1;
 Coroutine_Mailbox   mail1;
 
-static uint64_t Task1_func1(Coroutine_Handle coroutine, uint32_t timeout)
+static uint64_t Task1_func1(uint32_t timeout)
 {
     uint64_t ts = Coroutine.GetMillisecond();
-    Coroutine.YieldDelay(coroutine, 1000);
+    Coroutine.YieldDelay(1000);
     ts = Coroutine.GetMillisecond() - ts;
     return ts;
 }
 
-void Task1(Coroutine_Handle coroutine, void *obj)
+void Task1(void *obj)
 {
     int   i       = 0;
     char *str_buf = new char[4 * 1024];
     while (true) {
         PrintMemory();
         std::string str = "hello";
-        uint64_t    ts  = Task1_func1(coroutine, 1000);
+        uint64_t    ts  = Task1_func1(1000);
         str += std::to_string(i);
         printf("[%llu][1][%llu]i = %d %s\n", Coroutine.GetMillisecond(), ts, i++, str.c_str());
-        Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str.c_str(), str.size(), 10);
+        Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str.c_str(), str.size(), 1000);
         if (!Coroutine.SendMail(mail1, data))
             Coroutine.DeleteMessage(data);
         Sleep(10);
@@ -40,14 +40,14 @@ void Task1(Coroutine_Handle coroutine, void *obj)
     return;
 }
 
-void Task2(Coroutine_Handle coroutine, void *obj)
+void Task2(void *obj)
 {
     int i = 0;
     printf("start: %llx", Coroutine.GetMillisecond());
     while (true) {
         std::string str = "hello";
         uint64_t    ts  = Coroutine.GetMillisecond();
-        Coroutine.YieldDelay(coroutine, 500);
+        Coroutine.YieldDelay(500);
         ts = Coroutine.GetMillisecond() - ts;
         str += std::to_string(i);
         printf("[%llu][2][%llu]i = %d %s\n", Coroutine.GetMillisecond(), ts, i++, str.c_str());
@@ -57,10 +57,10 @@ void Task2(Coroutine_Handle coroutine, void *obj)
     return;
 }
 
-void Task3(Coroutine_Handle coroutine, void *obj)
+void Task3(void *obj)
 {
     while (true) {
-        if (!Coroutine.WaitSemaphore(coroutine, sem1, 1, 100))
+        if (!Coroutine.WaitSemaphore(sem1, 1, 100))
             continue;
         printf("[%llu][3]sem1 signal\n", Coroutine.GetMillisecond());
         Sleep(1);
@@ -68,11 +68,11 @@ void Task3(Coroutine_Handle coroutine, void *obj)
     return;
 }
 
-void Task4(Coroutine_Handle coroutine, void *obj)
+void Task4(void *obj)
 {
     while (true) {
-        Coroutine.YieldDelay(coroutine, 500);
-        auto data = Coroutine.ReceiveMail(coroutine, mail1, 0xFF, 100);
+        Coroutine.YieldDelay(500);
+        auto data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
         if (data == NULL) continue;
         printf("[%llu][4]mail1 recv: %llu %.*s\n",
                Coroutine.GetMillisecond(),
@@ -87,28 +87,20 @@ void Task4(Coroutine_Handle coroutine, void *obj)
 
 int main()
 {
-    extern const Coroutine_Inter  *GetInter(void);
-    extern const Coroutine_Events *GetEvents(void);
-    auto                           inter  = GetInter();
-    auto                           events = GetEvents();
+    extern const Coroutine_Inter *GetInter(void);
+    auto                          inter = GetInter();
     Coroutine.SetInter(inter);
-
-    Coroutine_Handle coroutine  = Coroutine.Create("c1", events);
-    Coroutine_Handle coroutine2 = Coroutine.Create("c2", events);
 
     sem1  = Coroutine.CreateSemaphore("sem1", 0);
     mail1 = Coroutine.CreateMailbox("mail1", 1024);
 
-    Coroutine.AddTask(coroutine, Task1, nullptr, "Task1");
-    Coroutine.AddTask(coroutine, Task2, nullptr, "Task2");
-    Coroutine.AddTask(coroutine2, Task3, nullptr, "Task3");
-    Coroutine.AddTask(coroutine2, Task4, nullptr, "Task4");
+    Coroutine.AddTask(0, Task1, nullptr, "Task1");
+    Coroutine.AddTask(0, Task2, nullptr, "Task2");
+    Coroutine.AddTask(0, Task3, nullptr, "Task3");
+    Coroutine.AddTask(0, Task4, nullptr, "Task4");
 
-    volatile void *ptr = &coroutine;
-    printf("%p\n", ptr);
     while (true) {
-        Coroutine.RunTick(coroutine);
-        Coroutine.RunTick(coroutine2);
+        Coroutine.RunTick();
     }
     return 0;
 }

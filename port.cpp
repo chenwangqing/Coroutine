@@ -42,7 +42,7 @@ static void _Free(void *ptr, const char *file, int line)
     size_t *p = (size_t *)ptr;
     p--;
     EnterCriticalSection(&critical_section);
-    memory.used -= *p;
+    memory.used -= *p + sizeof(size_t);
     LeaveCriticalSection(&critical_section);
     return;
 }
@@ -64,12 +64,31 @@ static uint64_t GetMillisecond()
     return timeGetTime();
 }
 
+static size_t GetThreadId(void)
+{
+    return GetCurrentThreadId();
+}
+
+static Coroutine_Events events = {
+    nullptr,
+    nullptr,
+    nullptr,
+    [](uint32_t time, void *object) -> void {
+        Sleep(1);
+        return;
+    },
+    nullptr,
+};
+
 static const Coroutine_Inter Inter = {
+    1,
     _Lock,
     _Unlock,
     _Malloc,
     _Free,
     GetMillisecond,
+    GetThreadId,
+    &events,
 };
 
 const Coroutine_Inter *GetInter(void)
@@ -77,17 +96,6 @@ const Coroutine_Inter *GetInter(void)
     InitializeCriticalSection(&critical_section);
     InitializeCriticalSection(&memory_critical_section);
     return &Inter;
-}
-
-const Coroutine_Events *GetEvents(void)
-{
-    static Coroutine_Events events = {NULL};
-    memset(&events, 0, sizeof(events));
-    events.Idle                    = [](Coroutine_Handle coroutine, uint32_t time, void *object) -> void {
-        Sleep(1);
-        return;
-    };
-    return &events;
 }
 
 void PrintMemory(void)

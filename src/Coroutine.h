@@ -2,7 +2,7 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.13
+ * @version  1.14
  * @date     2022-08-15
  *
  * @copyright Copyright (c) 2022  Four-Faith
@@ -24,6 +24,7 @@
  * <tr><td>2022-09-19 <td>1.11    <td>CXS    <td>添加默认事件
  * <tr><td>2024-06-26 <td>1.12    <td>CXS    <td>添加Coroutine_Inter
  * <tr><td>2024-06-27 <td>1.13    <td>CXS    <td>修正一些任务切换的错误；添加邮箱通信
+ * <tr><td>2024-06-28 <td>1.14    <td>CXS    <td>取消显示协程控制器，自动根据线程id分配控制器
  * </table>
  *
  * @note
@@ -61,32 +62,49 @@ typedef struct _CO_TCB *      Coroutine_TaskId;      // 任务id
 typedef struct _CO_Semaphore *Coroutine_Semaphore;   // 信号量
 typedef struct _CO_Mailbox *  Coroutine_Mailbox;     // 邮箱
 // 任务回调
-typedef void (*Coroutine_Task)(Coroutine_Handle coroutine, void *obj);
+typedef void (*Coroutine_Task)(void *obj);
 // 周期回调（用于看门狗）
-typedef void (*Coroutine_Period_Event)(Coroutine_Handle coroutine,
-                                       Coroutine_TaskId task,
-                                       void *           object);
+typedef void (*Coroutine_Period_Event)(void *object);
 // 内存分配失败
-typedef void (*Coroutine_Allocation_Event)(Coroutine_Handle coroutine, int line, size_t size, void *object);
+typedef void (*Coroutine_Allocation_Event)(int line, size_t size, void *object);
 // 空闲事件（可用于低功耗休眠）
-typedef void (*Coroutine_Idle_Event)(Coroutine_Handle coroutine, uint32_t time, void *object);
+typedef void (*Coroutine_Idle_Event)(uint32_t time, void *object);
 // 空闲唤醒
-typedef void (*Coroutine_Wake_Event)(Coroutine_Handle coroutine, void *object);
+typedef void (*Coroutine_Wake_Event)(void *object);
+
+/**
+ * @brief    协程事件
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2022-08-16
+ */
+typedef struct
+{
+    void *                     object;       // 用户对象
+    Coroutine_Period_Event     Period;       // 周期事件
+    Coroutine_Allocation_Event Allocation;   // 分配失败事件
+    Coroutine_Idle_Event       Idle;         // 空闲事件
+    Coroutine_Wake_Event       wake;         // 唤醒事件
+} Coroutine_Events;
+
 // 协程接口
 typedef struct
 {
+    size_t thread_count;   // 线程数量
+
     /**
     * @brief    加锁，临界保护
     * @author   CXS (chenxiangshu@outlook.com)
     * @date     2024-06-26
     */
     void (*Lock)(const char *file, int line);
+
     /**
     * @brief    解锁，临界保护
     * @author   CXS (chenxiangshu@outlook.com)
     * @date     2024-06-26
     */
     void (*Unlock)(const char *file, int line);
+
     /**
     * @brief    内存分配
     * @param    size           内存分配大小，字节
@@ -102,27 +120,28 @@ typedef struct
      * @date     2024-06-26
      */
     void (*Free)(void *ptr, const char *file, int line);
+
     /**
     * @brief    获取运行毫秒值
     * @author   CXS (chenxiangshu@outlook.com)
     * @date     2024-06-26
     */
-    uint64_t (*GetMillisecond)();
-} Coroutine_Inter;
+    uint64_t (*GetMillisecond)(void);
 
-/**
- * @brief    协程事件
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-16
- */
-typedef struct
-{
-    void *                     object;       // 用户对象
-    Coroutine_Period_Event     Period;       // 周期事件
-    Coroutine_Allocation_Event Allocation;   // 分配失败事件
-    Coroutine_Idle_Event       Idle;         // 空闲事件
-    Coroutine_Wake_Event       wake;         // 唤醒事件
-} Coroutine_Events;
+    /**
+     * @brief    获取线程id
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-28
+     */
+    size_t (*GetThreadId)(void);
+
+    /**
+     * @brief    事件
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-28
+     */
+    Coroutine_Events *events;
+} Coroutine_Inter;
 
 /**
  * @brief    邮件数据
@@ -149,26 +168,8 @@ typedef struct
     void (*SetInter)(const Coroutine_Inter *inter);
 
     /**
-   * @brief    【外部使用】创建协程
-   * @param    name           名称 31 字节
-   * @param    events         事件
-   * @return   Coroutine_Handle    NULL 表示创建失败
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-15
-   */
-    Coroutine_Handle (*Create)(const char *name, const Coroutine_Events *events);
-
-    /**
-   * @brief    【外部使用】删除协程
-   * @param    c              协程实例
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-16
-   */
-    void (*Delete)(Coroutine_Handle c);
-
-    /**
    * @brief    添加协程任务
-   * @param    c              协程实例
+   * @param    co_idx         协程索引 小于SetInter设置的线程数量
    * @param    func           执行函数
    * @param    pars           执行参数
    * @param    name           任务名称 最大31字节
@@ -176,16 +177,29 @@ typedef struct
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-15
    */
-    Coroutine_TaskId (*AddTask)(Coroutine_Handle c, Coroutine_Task func, void *pars, const char *name);
+    Coroutine_TaskId (*AddTask)(uint16_t co_idx, Coroutine_Task func, void *pars, const char *name);
 
     /**
    * @brief    获取当前任务id
-   * @param    c              协程实例
    * @return   Coroutine_TaskId
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-16
    */
-    Coroutine_TaskId (*GetTaskId)(Coroutine_Handle c);
+    Coroutine_TaskId (*GetCurrentTaskId)(void);
+
+    /**
+     * @brief    获取当前协程索引
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-28
+     */
+    uint16_t (*GetCurrentCoroutineIdx)(void);
+
+    /**
+     * @brief    获取协程的线程id
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-28
+     */
+    size_t (*GetThreadId)(uint16_t co_id);
 
     /**
    * @brief    【内部使用】转交控制权
@@ -193,7 +207,7 @@ typedef struct
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-15
    */
-    void (*Yield)(Coroutine_Handle coroutine);
+    void (*Yield)(void);
 
     /**
    * @brief    【内部使用】转交控制权
@@ -202,15 +216,16 @@ typedef struct
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-15
    */
-    void (*YieldDelay)(Coroutine_Handle coroutine, uint32_t timeout);
+    void (*YieldDelay)(uint32_t timeout);
 
     /**
      * @brief    【外部使用】运行协程(一次运行一个任务)
      * @param    c              协程实例
+     * @return   true           有任务在运行
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-08-17
      */
-    bool (*RunTick)(Coroutine_Handle c);
+    bool (*RunTick)(void);
 
     /**
    * @brief    暂停
@@ -275,15 +290,13 @@ typedef struct
 
     /**
     * @brief    【内部使用】接收邮件
-    * @param    c              协程实例
     * @param    mb             邮箱
     * @param    eventId_Mask   消息id掩码
     * @param    timeout        接收超时
     * @author   CXS (chenxiangshu@outlook.com)
     * @date     2024-06-26
     */
-    Coroutine_MailData *(*ReceiveMail)(Coroutine_Handle  c,
-                                       Coroutine_Mailbox mb,
+    Coroutine_MailData *(*ReceiveMail)(Coroutine_Mailbox mb,
                                        uint64_t          eventId_Mask,
                                        uint32_t          timeout);
 
@@ -335,7 +348,6 @@ typedef struct
 
     /**
    * @brief    【内部使用】等待信号量
-   * @param    c              协程实例
    * @param    _sem           信号量
    * @param    val            数值
    * @param    timeout        超时
@@ -344,8 +356,7 @@ typedef struct
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-17
    */
-    bool (*WaitSemaphore)(Coroutine_Handle    c,
-                          Coroutine_Semaphore _sem,
+    bool (*WaitSemaphore)(Coroutine_Semaphore _sem,
                           uint32_t            val,
                           uint32_t            timeout);
 
@@ -356,7 +367,7 @@ typedef struct
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-09-19
    */
-    uint64_t (*GetMillisecond)();
+    uint64_t (*GetMillisecond)(void);
 
     /**
    * @brief    内存分配
