@@ -81,7 +81,7 @@ static Coroutine_Events events = {
 };
 
 static const Coroutine_Inter Inter = {
-    1,
+    2,
     _Lock,
     _Unlock,
     _Malloc,

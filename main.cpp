@@ -85,6 +85,13 @@ void Task4(void *obj)
     return;
 }
 
+DWORD WINAPI ThreadProc(LPVOID lpParam)
+{
+    while (true)
+        Coroutine.RunTick();
+    return 0;
+}
+
 int main()
 {
     extern const Coroutine_Inter *GetInter(void);
@@ -94,13 +101,23 @@ int main()
     sem1  = Coroutine.CreateSemaphore("sem1", 0);
     mail1 = Coroutine.CreateMailbox("mail1", 1024);
 
-    Coroutine.AddTask(0, Task1, nullptr, "Task1");
-    Coroutine.AddTask(0, Task2, nullptr, "Task2");
-    Coroutine.AddTask(0, Task3, nullptr, "Task3");
-    Coroutine.AddTask(0, Task4, nullptr, "Task4");
+    Coroutine.AddTask(-1, Task1, nullptr, "Task1");
+    Coroutine.AddTask(-1, Task2, nullptr, "Task2");
+    Coroutine.AddTask(-1, Task3, nullptr, "Task3");
+    Coroutine.AddTask(-1, Task4, nullptr, "Task4");
+
+    for (int i = 0; i < inter->thread_count; i++) {
+        CreateThread(
+            NULL,         // 默认安全属性
+            0,            // 使用默认堆栈大小
+            ThreadProc,   // 线程函数
+            NULL,         // 传递给线程函数的参数
+            0,            // 使用默认创建标志
+            NULL);        // 返回线程ID
+    }
 
     while (true) {
-        Coroutine.RunTick();
+        Sleep(100);
     }
     return 0;
 }

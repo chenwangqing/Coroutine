@@ -61,6 +61,7 @@ typedef struct _CO_Thread *   Coroutine_Handle;      // 协程实例
 typedef struct _CO_TCB *      Coroutine_TaskId;      // 任务id
 typedef struct _CO_Semaphore *Coroutine_Semaphore;   // 信号量
 typedef struct _CO_Mailbox *  Coroutine_Mailbox;     // 邮箱
+typedef struct _CO_ASync      Coroutine_ASync;       // 异步任务
 // 任务回调
 typedef void (*Coroutine_Task)(void *obj);
 // 周期回调（用于看门狗）
@@ -71,6 +72,8 @@ typedef void (*Coroutine_Allocation_Event)(int line, size_t size, void *object);
 typedef void (*Coroutine_Idle_Event)(uint32_t time, void *object);
 // 空闲唤醒
 typedef void (*Coroutine_Wake_Event)(void *object);
+// 异步任务
+typedef void *(*Coroutine_AsyncTask)(void *arg);
 
 /**
  * @brief    协程事件
@@ -160,7 +163,7 @@ typedef struct _C_MailData
 typedef struct
 {
     /**
-     * @brief    【外部使用】设置接口
+     * @brief    【外部使用】设置接口 ！！！ 必须第一个调头
      * @param    inter          外部接口
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-26
@@ -169,7 +172,7 @@ typedef struct
 
     /**
    * @brief    添加协程任务
-   * @param    co_idx         协程索引 小于SetInter设置的线程数量
+   * @param    co_idx         协程索引 小于SetInter设置的线程数量 -1: 随机分配
    * @param    func           执行函数
    * @param    pars           执行参数
    * @param    name           任务名称 最大31字节
@@ -177,7 +180,7 @@ typedef struct
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-15
    */
-    Coroutine_TaskId (*AddTask)(uint16_t co_idx, Coroutine_Task func, void *pars, const char *name);
+    Coroutine_TaskId (*AddTask)(int co_idx, Coroutine_Task func, void *pars, const char *name);
 
     /**
    * @brief    获取当前任务id
@@ -226,22 +229,6 @@ typedef struct
      * @date     2022-08-17
      */
     bool (*RunTick)(void);
-
-    /**
-   * @brief    暂停
-   * @param    taskId         任务id
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-16
-   */
-    void (*Suspend)(Coroutine_TaskId taskId);
-
-    /**
-   * @brief    恢复
-   * @param    taskId         任务id
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-16
-   */
-    void (*Resume)(Coroutine_TaskId taskId);
 
     /**
    * @brief    制作消息
@@ -362,7 +349,6 @@ typedef struct
 
     /**
    * @brief    获取毫秒值
-   * @param    c              协程实例
    * @return   const Coroutine_Events*
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-09-19
@@ -381,7 +367,6 @@ typedef struct
 
     /**
    * @brief    内存释放
-   * @param    c              协程实例
    * @return   const Coroutine_Events*
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-09-19
@@ -398,6 +383,32 @@ typedef struct
      * @date     2024-06-27
      */
     const char *(*GetTaskName)(Coroutine_TaskId taskId);
+
+    /**
+     * @brief    执行异步任务
+     * @param    func           执行函数
+     * @param    _sem           参数
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-28
+     */
+    Coroutine_ASync *(*ASync)(Coroutine_AsyncTask func, void *arg);
+
+    /**
+     * @brief    等待异步任务完成
+     * @param    async          异步任务
+     * @param    timeout        等待超时
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-28
+     */
+    bool (*ASyncWait)(Coroutine_ASync *async, uint32_t timeout);
+
+    /**
+     * @brief    获取异步任务结果，并删除异步任务
+     * @param    async_ptr      异步任务指针
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-28
+     */
+    void *(*ASyncGetResultAndDelete)(Coroutine_ASync **async_ptr);
 } _Coroutine;
 
 /**
