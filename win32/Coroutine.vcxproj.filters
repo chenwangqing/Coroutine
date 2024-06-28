@@ -18,24 +18,24 @@
     <ClCompile Include="main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="src\Coroutine.c">
+    <ClCompile Include="..\src\Coroutine.c">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="port.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="src\NodeLink.c">
+    <ClCompile Include="..\src\NodeLink.c">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\Coroutine.h">
+    <ClInclude Include="..\src\Coroutine.h">
       <Filter>源文件</Filter>
     </ClInclude>
-    <ClInclude Include="src\Define.h">
+    <ClInclude Include="..\src\Define.h">
       <Filter>源文件</Filter>
     </ClInclude>
-    <ClInclude Include="src\NodeLink.h">
+    <ClInclude Include="..\src\NodeLink.h">
       <Filter>源文件</Filter>
     </ClInclude>
   </ItemGroup>
