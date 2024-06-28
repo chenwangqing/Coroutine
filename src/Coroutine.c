@@ -376,7 +376,7 @@ static void _enter_into(CO_TCB *n)
             // 设置已运行标志
             n->isFirst = false;
             // 第一次运行
-            n->func(n->coroutine, n->obj);
+            n->func(n->obj);
             // 设置删除标志
             n->isDel = true;
         } else {

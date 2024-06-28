@@ -59,11 +59,27 @@ void Task2(void *obj)
 
 void Task3(void *obj)
 {
+    auto func = [](void *obj) -> void * {
+        int     *a   = (int *)obj;
+        uint64_t now = Coroutine.GetMillisecond();
+        Sleep(2);
+        Coroutine.YieldDelay(100);
+        (*a) = Coroutine.GetMillisecond() - now;
+        return a;
+    };
+    int             *a  = new int(0);
+    Coroutine_ASync *re = nullptr;
     while (true) {
         if (!Coroutine.WaitSemaphore(sem1, 1, 100))
             continue;
         printf("[%llu][3]sem1 signal\n", Coroutine.GetMillisecond());
         Sleep(1);
+        if (re && Coroutine.ASyncWait(re, 100)) {
+            int *b = (int *)Coroutine.ASyncGetResultAndDelete(&re);
+            printf("[%llu][3]async result: %d\n", Coroutine.GetMillisecond(), *b);
+        }
+        if (!re)
+            re = Coroutine.ASync(func, a);
     }
     return;
 }
