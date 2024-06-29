@@ -30,9 +30,11 @@ void Task1(void *obj)
         uint64_t    ts  = Task1_func1(1000);
         str += std::to_string(i);
         printf("[%llu][1][%llu]i = %d %s\n", Coroutine.GetMillisecond(), ts, i++, str.c_str());
+#if 1
         Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str.c_str(), str.size(), 1000);
         if (!Coroutine.SendMail(mail1, data))
             Coroutine.DeleteMessage(data);
+#endif
         Sleep(10);
         Coroutine.PrintInfo(str_buf, 4 * 1024);
         printf("%s", str_buf);

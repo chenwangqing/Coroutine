@@ -50,13 +50,13 @@ static void longjmp(jmp_buf buf, int val)
 {
     __asm {
         mov eax, dword ptr[val]
-        mov ebx, dword ptr[buf]
-        mov esi, dword ptr[ebx + 4]
-        mov edi, dword ptr[ebx + 8]
-        mov esp, dword ptr[ebx + 12]
-        mov ebp, dword ptr[ebx + 16]
-        mov ecx, dword ptr[ebx + 20]
-        mov ebx, dword ptr[ebx + 0]
+        mov edi, dword ptr[buf]
+        mov esi, dword ptr[edi + 4]   // 保存 esi
+        mov esp, dword ptr[edi + 12]   // 保存 esp
+        mov ebp, dword ptr[edi + 16]   // 保存 edp
+        mov ecx, dword ptr[edi + 20]   // 保存 setjmp 下一个地址
+        mov ebx, dword ptr[edi + 0]   // 保存 ebx
+        mov edi, dword ptr[edi + 8]   // 保存 edi
         jmp ecx
     }
     return;
@@ -213,7 +213,7 @@ static struct
     CM_NodeLinkList_t semaphores;    // 信号列表
     CM_NodeLinkList_t mailboxes;     // 邮箱列表
     CO_Thread **      coroutines;    // 协程控制器
-    CO_TCB **         tasks_map;     // 任务映射表 根据协程id 用于上下文切换
+    volatile CO_TCB **tasks_map;     // 任务映射表 根据协程id 用于上下文切换
     uint16_t          alloc_co_id;   // 协程id
 } C_Static;
 
@@ -227,8 +227,9 @@ static struct
         Inter.Unlock(__FILE__, __LINE__); \
     } while (false);
 
-static void             DeleteMessage(Coroutine_MailData *dat);
-static Coroutine_Handle Coroutine_Create(size_t id);
+static void                   DeleteMessage(Coroutine_MailData *dat);
+static Coroutine_Handle       Coroutine_Create(size_t id);
+volatile static func_setjmp_t _c_setjmp = setjmp;
 
 /**
  * @brief    删除任务
@@ -357,8 +358,7 @@ static void _enter_into(volatile CO_TCB *n)
     else if (n->coroutine->stack != (int *)&__stack)
         return;   // 栈错误,栈被迁移
     // 保存环境
-    volatile static func_setjmp_t _c_setjmp = setjmp;   // 防止setjmp内联
-    int                           ret       = _c_setjmp(n->coroutine->env);
+    int ret = _c_setjmp(n->coroutine->env);
     if (ret == 0) {
         if (n->isFirst) {
             // 设置已运行标志
@@ -427,39 +427,41 @@ static void _Task(CO_Thread *coroutine)
  */
 static void ContextSwitch(volatile CO_TCB *n)
 {
-    volatile int __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
-    // 保存栈数据
-    n->p_stack = ((int *)&__mem);   // 获取栈结尾
-    n->p_stack -= 4;
-    n->stack_len = n->coroutine->stack - n->p_stack;
-    if (n->stack_len > n->stack_alloc) {
-        if (n->stack != nullptr)
-            Inter.Free(n->stack, __FILE__, __LINE__);
-        n->stack_alloc = ALIGN(n->stack_len, 128) * 128;   // 按512字节分配，避免内存碎片
-        n->stack       = (int *)Inter.Malloc(n->stack_alloc * sizeof(int), __FILE__, __LINE__);
-    }
-    if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
-    if (n->stack == nullptr) {
-        // 内存分配错误
-        n->isDel = true;
-        if (Inter.events->Allocation != nullptr)
-            Inter.events->Allocation(__LINE__,
-                                     n->stack_len,
-                                     Inter.events->object);
-        return;
-    } else
-        memcpy((char *)n->stack, (char *)n->p_stack, n->stack_len * sizeof(int));
-    volatile static func_setjmp_t _c_setjmp = setjmp;
     // 保存环境,回到调度器
     int ret = _c_setjmp(((CO_TCB *)n)->env);
-    if (ret == 0)
+    if (ret == 0) {
+        volatile int __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
+        // 保存栈数据
+        n->p_stack = ((int *)&__mem);   // 获取栈结尾
+        n->p_stack -= 4;
+        n->stack_len = n->coroutine->stack - n->p_stack;
+        if (n->stack_len > n->stack_alloc) {
+            if (n->stack != nullptr)
+                Inter.Free(n->stack, __FILE__, __LINE__);
+            n->stack_alloc = ALIGN(n->stack_len, 128) * 128;   // 按512字节分配，避免内存碎片
+            n->stack       = (int *)Inter.Malloc(n->stack_alloc * sizeof(int), __FILE__, __LINE__);
+        }
+        if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
+        if (n->stack == nullptr) {
+            // 内存分配错误
+            n->isDel = true;
+            if (Inter.events->Allocation != nullptr)
+                Inter.events->Allocation(__LINE__,
+                                         n->stack_len,
+                                         Inter.events->object);
+            return;
+        }
+        memcpy((char *)n->stack, (char *)n->p_stack, n->stack_len * sizeof(int));
+        // 回到调度器
         longjmp(n->coroutine->env, 1);
-    n = C_Static.tasks_map[ret - 1];
-    // 恢复堆栈内容
-    n->p = n->p_stack + n->stack_len - 1;
-    n->s = n->stack + n->stack_len - 1;
-    while (n->s >= n->stack)   // 限制范围
-        *(n->p)-- = *(n->s)--;
+    } else {
+        n = *(C_Static.tasks_map + ret - 1);
+        // 恢复堆栈内容
+        n->p = n->p_stack + n->stack_len - 1;
+        n->s = n->stack + n->stack_len - 1;
+        while (n->s >= n->stack)   // 限制范围
+            *(n->p)-- = *(n->s)--;
+    }
     return;
 }
 
@@ -523,10 +525,11 @@ static CO_Thread *GetCurrentThread(int co_idx)
     size_t     idx = 0;
     CO_Thread *ret = nullptr;
     if (co_idx < 0) {
-        size_t id = Inter.GetThreadId();
+        size_t id  = Inter.GetThreadId();
+        size_t _id = id % 65537;
         CO_Lock();
         for (size_t i = 0; i < Inter.thread_count; i++) {
-            idx = (id + i) % Inter.thread_count;
+            idx = (_id + i) % Inter.thread_count;
             if (C_Static.coroutines[idx]->ThreadId == id) {
                 ret = C_Static.coroutines[idx];
                 break;
@@ -1011,7 +1014,8 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
         idx += co_snprintf(buf + idx,
                            max_size - idx,
                            "   %s   ",
-                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem) ? "W" : "S");
+                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem) ? "W"
+                                                                                               : "S");
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
@@ -1272,7 +1276,6 @@ static bool WaitSemaphore(Coroutine_Semaphore _sem, uint32_t val, uint32_t timeo
         n->number    = val;
         n->task      = task;
         n->semaphore = sem;
-        CM_NodeLink_Init(&n->link);
         // 加入等待列表
         CM_NodeLink_Insert(&sem->list, CM_NodeLink_End(sem->list), &n->link);
         // 设置等待标志
@@ -1355,7 +1358,7 @@ static void SetInter(const Coroutine_Inter *inter)
     }
     // 创建任务映射表
     C_Static.tasks_map = (CO_TCB **)Inter.Malloc(inter->thread_count * sizeof(CO_TCB *), __FILE__, __LINE__);
-    memset(C_Static.tasks_map, 0, inter->thread_count * sizeof(CO_TCB *));
+    memset((CO_TCB **)C_Static.tasks_map, 0, inter->thread_count * sizeof(CO_TCB *));
     return;
 }
 
