@@ -1014,8 +1014,7 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
         idx += co_snprintf(buf + idx,
                            max_size - idx,
                            "   %s   ",
-                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem) ? "W"
-                                                                                               : "S");
+                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem) ? "W" : "S");
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
@@ -1357,7 +1356,7 @@ static void SetInter(const Coroutine_Inter *inter)
         C_Static.coroutines[i]->co_id = i;
     }
     // 创建任务映射表
-    C_Static.tasks_map = (CO_TCB **)Inter.Malloc(inter->thread_count * sizeof(CO_TCB *), __FILE__, __LINE__);
+    C_Static.tasks_map = (volatile CO_TCB **)Inter.Malloc(inter->thread_count * sizeof(CO_TCB *), __FILE__, __LINE__);
     memset((CO_TCB **)C_Static.tasks_map, 0, inter->thread_count * sizeof(CO_TCB *));
     return;
 }
