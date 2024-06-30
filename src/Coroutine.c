@@ -1196,8 +1196,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "  Owner  ");
     else
         idx += co_snprintf(buf + idx, max_size - idx, "     Owner     ");
-    idx += co_snprintf(buf + idx, max_size - idx, " Value  ");
-    idx += co_snprintf(buf + idx, max_size - idx, " Value  ");
+    idx += co_snprintf(buf + idx, max_size - idx, "  Value  ");
     idx += co_snprintf(buf + idx, max_size - idx, " Wait   ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
@@ -1208,6 +1207,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%p ", m->owner);
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u", m->value);
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u", m->wait_count);
+        idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
     CO_UnLock();
     return idx;
@@ -1434,7 +1434,8 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
     // 移除等待列表
     CO_Lock();
     CM_NodeLink_Remove(&mutex->list, &task->wait_mutex);
-    mutex->wait_count--;
+    if (task->isWaitMutex)
+        mutex->wait_count--;
     task->isWaitMutex = false;
     isOk              = mutex->owner == task;
     CO_UnLock();
@@ -1458,8 +1459,10 @@ static void UnlockMutex(Coroutine_Mutex mutex)
                 task             = CM_NodeLink_ToType(CO_TCB, wait_mutex, CM_NodeLink_First(mutex->list));
                 task->execv_time = 0;
                 task->timeout    = 0;
-                mutex->owner     = task;
-                mutex->value     = 1;
+                task->isWaitMutex = false;
+                mutex->owner      = task;
+                mutex->value      = 1;
+                mutex->wait_count--;
                 AddTaskList(task);
             }
         }
