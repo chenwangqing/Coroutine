@@ -79,6 +79,7 @@ typedef struct _SemaphoreNode SemaphoreNode;   // 信号节点
 typedef struct _MailWaitNode  MailWaitNode;    // 信号节点
 typedef struct _CO_Mailbox    CO_Mailbox;      // 邮箱
 typedef struct _CO_ASync      CO_ASync;        // 异步任务
+typedef struct _CO_Mutex      CO_Mutex;        // 互斥锁
 
 /**
  * @brief    信号节点
@@ -122,6 +123,16 @@ struct _CO_Semaphore
     CM_NodeLink_t     link;         // _CO_Semaphore
 };
 
+struct _CO_Mutex
+{
+    char              name[32];
+    CM_NodeLinkList_t list;         // 等待列表 _CO_TCB
+    uint32_t          value;        // 互斥值
+    uint32_t          wait_count;   // 等待数量
+    CM_NodeLink_t     link;         // _CO_Mutex
+    CO_TCB *          owner;        // 持有者
+};
+
 /**
  * @brief    协程节点
  * @author   CXS (chenxiangshu@outlook.com)
@@ -129,29 +140,34 @@ struct _CO_Semaphore
  */
 struct _CO_TCB
 {
-    jmp_buf        env;              // 环境
-    uint64_t       execv_time;       // 执行时间
-    uint32_t       timeout;          // 超时时间
-    int *          stack;            // 栈缓存
-    int *          p_stack;          // 栈
-    uint32_t       stack_len;        // 当前栈长度
-    uint32_t       stack_max;        // 最大长度
-    uint32_t       stack_alloc;      // 分配长度
-    uint32_t       isDel : 1;        // 是否删除
-    uint32_t       isRun : 1;        // 正在运行
-    uint32_t       isWaitMail : 1;   // 正在等待邮件
-    uint32_t       isWaitSem : 1;    // 等待信号量
-    uint32_t       isFirst : 1;      // 首次
-    Coroutine_Task func;             // 执行
-    void *         obj;              // 执行参数
-    uint64_t       run_time;         // 运行时间
-    CO_Thread *    coroutine;        // 父节点
-    int *          s, *p;            // 临时变量
-    char *         name;             // 名称
+    jmp_buf        env;                  // 环境
+    uint64_t       execv_time;           // 执行时间
+    uint32_t       timeout;              // 超时时间
+    int *          stack;                // 栈缓存
+    int *          p_stack;              // 栈
+    uint32_t       stack_len;            // 当前栈长度
+    uint32_t       stack_max;            // 最大长度
+    uint32_t       stack_alloc;          // 分配长度
+    uint32_t       isDel : 1;            // 是否删除
+    uint32_t       isRun : 1;            // 正在运行
+    uint32_t       isWaitMail : 1;       // 正在等待邮件
+    uint32_t       isWaitSem : 1;        // 等待信号量
+    uint32_t       isWaitMutex : 1;      // 等待互斥量
+    uint32_t       isFirst : 1;          // 首次
+    uint32_t       isAddRunList : 1;     // 添加运行列表
+    uint32_t       isAddSleepList : 1;   // 添加睡眠列表
+    uint32_t       isAddStopList : 1;    // 添加停止列表
+    Coroutine_Task func;                 // 执行
+    void *         obj;                  // 执行参数
+    uint64_t       run_time;             // 运行时间
+    CO_Thread *    coroutine;            // 父节点
+    int *          s, *p;                // 临时变量
+    char *         name;                 // 名称
 
 
-    SemaphoreNode wait_sem;    // 信号等待节点
-    MailWaitNode  wait_mail;   // 邮件等待节点
+    SemaphoreNode wait_sem;     // 信号等待节点
+    MailWaitNode  wait_mail;    // 邮件等待节点
+    CM_NodeLink_t wait_mutex;   // 等待互斥锁节点
 
     CM_NodeLink_t link;   // _CO_TCB
 };
@@ -212,6 +228,7 @@ static struct
     CM_NodeLinkList_t threads;       // 协程控制器列表
     CM_NodeLinkList_t semaphores;    // 信号列表
     CM_NodeLinkList_t mailboxes;     // 邮箱列表
+    CM_NodeLinkList_t mutexes;       // 互斥列表 _CO_Mutex
     CO_Thread **      coroutines;    // 协程控制器
     volatile CO_TCB **tasks_map;     // 任务映射表 根据协程id 用于上下文切换
     uint16_t          alloc_co_id;   // 协程id
@@ -272,29 +289,56 @@ static void DeleteTask(CO_TCB *t)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-06-28
  */
-static void AddTaskList(CO_Thread *coroutine, CO_TCB *task)
+static void AddTaskList(CO_TCB *task)
 {
-    uint64_t now = Inter.GetMillisecond();
-    if (task->isRun == 0)   // 加入停止列表
+    CO_Thread *coroutine = task->coroutine;
+    uint64_t   now       = Inter.GetMillisecond();
+    if (task->isAddRunList) {
+        CM_NodeLink_Remove(&coroutine->tasks_run, &task->link);
+        task->isAddRunList = 0;
+    } else if (task->isAddSleepList) {
+        CM_NodeLink_Remove(&coroutine->tasks_sleep, &task->link);
+        task->isAddSleepList = 0;
+    } else if (task->isAddStopList) {
+        CM_NodeLink_Remove(&coroutine->tasks_stop, &task->link);
+        task->isAddStopList = 0;
+    }
+    if (task->isRun == 0) {   // 加入停止列表
         CM_NodeLink_Insert(&coroutine->tasks_stop, CM_NodeLink_End(coroutine->tasks_stop), &task->link);
-    if (task->isDel || now >= task->execv_time)   // 加入运行列表
+        task->isAddStopList = 1;
+    } else if (task->isDel || now >= task->execv_time) {   // 加入运行列表
         CM_NodeLink_Insert(&coroutine->tasks_run, CM_NodeLink_End(coroutine->tasks_run), &task->link);
-    else {
-        // 加入休眠列表，从小到大
-        CO_TCB *r = nullptr;
-        CM_NodeLink_Foreach_Positive(CO_TCB, link, coroutine->tasks_sleep, p)
-        {
-            if (p->execv_time > task->execv_time) {
-                r = p;
-                break;
+        task->isAddRunList = 1;
+    } else {   // 加入休眠列表，从小到大
+        if (CM_NodeLink_IsEmpty(coroutine->tasks_sleep)) {
+            CM_NodeLink_Init(&task->link);
+            coroutine->tasks_sleep = &task->link;
+        } else {
+            CO_TCB *e = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_End(coroutine->tasks_sleep));
+            CO_TCB *s = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_sleep));
+            if (e->execv_time <= task->execv_time) {
+                // 加入到最后
+                CM_NodeLink_Insert(&coroutine->tasks_sleep, CM_NodeLink_End(coroutine->tasks_sleep), &task->link);
+            } else if (s->execv_time > task->execv_time) {
+                // 加入到头部
+                CM_NodeLink_Insert(&coroutine->tasks_sleep, CM_NodeLink_End(coroutine->tasks_sleep), &task->link);
+                coroutine->tasks_sleep = &task->link;
+            } else {
+                // 遍历寻找插入位置
+                CO_TCB *r = nullptr;
+                CM_NodeLink_Foreach_Positive(CO_TCB, link, coroutine->tasks_sleep, p)
+                {
+                    if (p->execv_time > task->execv_time) {
+                        r = p;
+                        break;
+                    }
+                }
+                CM_NodeLink_Insert(&coroutine->tasks_sleep,
+                                   r->link.up,
+                                   &task->link);
             }
         }
-        CM_NodeLink_Insert(&coroutine->tasks_sleep,
-                           r == nullptr ? CM_NodeLink_End(coroutine->tasks_sleep) : r->link.up,
-                           &task->link);
-        r = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_sleep));
-        if (r->execv_time > task->execv_time)
-            coroutine->tasks_sleep = &task->link;
+        task->isAddSleepList = 1;
     }
     return;
 }
@@ -313,6 +357,7 @@ static uint64_t GetSleepTask(CO_Thread *coroutine, uint64_t ts)
         return 0;
     CO_TCB *task = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_sleep));
     if (ts >= task->execv_time) {
+        task->isAddSleepList = 0;
         // 移除休眠列表
         CM_NodeLink_Remove(&coroutine->tasks_sleep, &task->link);
         // 加入运行列表
@@ -336,13 +381,14 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
     CO_TCB *task = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_run));
     // 移除运行列表
     CM_NodeLink_Remove(&coroutine->tasks_run, &task->link);
+    task->isAddRunList = 0;
     // 检查任务是否需要删除
     if (task->isDel) {
         DeleteTask(task);
         return nullptr;
     } else if (task->isRun == 0) {
         // 加入停止列表
-        AddTaskList(coroutine, task);
+        AddTaskList(task);
         return nullptr;
     }
     coroutine->idx_task = task;
@@ -409,7 +455,9 @@ static void _Task(CO_Thread *coroutine)
     n->run_time += tv;
     coroutine->idx_task = nullptr;
     // 添加到运行列表
-    AddTaskList(coroutine, (CO_TCB *)n);
+    CO_Lock();
+    AddTaskList((CO_TCB *)n);
+    CO_UnLock();
     // 周期事件
     if (Inter.events->Period != nullptr)
         Inter.events->Period(Inter.events->object);
@@ -644,7 +692,7 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
     CO_Lock();
     // 添加到任务列表
     coroutine->task_count++;
-    AddTaskList(coroutine, n);
+    AddTaskList(n);
     CO_UnLock();
     // 唤醒
     if (Inter.events->wake != nullptr)
@@ -869,7 +917,8 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
                 CO_TCB *task     = (CO_TCB *)n->task;
                 task->execv_time = 0;
                 task->timeout    = 0;
-                data             = nullptr;
+                AddTaskList(task);
+                data = nullptr;
                 break;
             }
             p = p->next;
@@ -1014,7 +1063,8 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
         idx += co_snprintf(buf + idx,
                            max_size - idx,
                            "   %s   ",
-                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem) ? "W" : "S");
+                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem) ? "W"
+                                                                                               : "S");
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
@@ -1139,6 +1189,26 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u", mb->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
+    // ----------------------------- 互斥 -----------------------------
+    idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
+    idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
+    if (sizeof(size_t) == 4)
+        idx += co_snprintf(buf + idx, max_size - idx, "  Owner  ");
+    else
+        idx += co_snprintf(buf + idx, max_size - idx, "     Owner     ");
+    idx += co_snprintf(buf + idx, max_size - idx, " Value  ");
+    idx += co_snprintf(buf + idx, max_size - idx, " Value  ");
+    idx += co_snprintf(buf + idx, max_size - idx, " Wait   ");
+    idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
+    sn = 0;
+    CM_NodeLink_Foreach_Positive(CO_Mutex, link, C_Static.mutexes, m)
+    {
+        idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-32s", m->name);
+        idx += co_snprintf(buf + idx, max_size - idx, "%p ", m->owner);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", m->value);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", m->wait_count);
+    }
     CO_UnLock();
     return idx;
 }
@@ -1234,6 +1304,7 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
         CO_TCB *task     = (CO_TCB *)n->task;
         task->execv_time = 0;
         task->timeout    = 0;
+        AddTaskList(task);
         CO_UnLock();
         // 唤醒
         if (Inter.events->wake != nullptr)
@@ -1298,6 +1369,103 @@ static bool WaitSemaphore(Coroutine_Semaphore _sem, uint32_t val, uint32_t timeo
     sem->wait_count--;
     CO_UnLock();
     return isOk;
+}
+
+static Coroutine_Mutex CreateMutex(const char *name)
+{
+    CO_Mutex *mutex = (CO_Mutex *)Inter.Malloc(sizeof(CO_Mutex), __FILE__, __LINE__);
+    if (mutex == nullptr) {
+        if (Inter.events->Allocation)
+            Inter.events->Allocation(__LINE__, sizeof(CO_Mutex), Inter.events->object);
+        return nullptr;
+    }
+    memset(mutex, 0, sizeof(CO_Mutex));
+    int s = name == nullptr ? 0 : strlen(name);
+    if (s > sizeof(mutex->name) - 1) s = sizeof(mutex->name) - 1;
+    memcpy(mutex->name, name, s);
+    mutex->name[s] = '\0';
+    // 加入列表
+    CO_Lock();
+    CM_NodeLink_Insert(&C_Static.mutexes, CM_NodeLink_End(C_Static.mutexes), &mutex->link);
+    CO_UnLock();
+    return mutex;
+}
+
+static void DeleteMutex(Coroutine_Mutex mutex)
+{
+    if (mutex == nullptr)
+        return;
+    // 移除列表
+    CO_Lock();
+    CM_NodeLink_Remove(&C_Static.mutexes, &mutex->link);
+    CO_UnLock();
+    Inter.Free(mutex, __FILE__, __LINE__);
+    return;
+}
+
+static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
+{
+    CO_Thread *c = GetCurrentThread(-1);
+    if (mutex == nullptr || c == nullptr || c->idx_task == nullptr)
+        return false;
+    CO_TCB *task = c->idx_task;
+    bool    isOk = false;
+    CO_Lock();
+    if (mutex->owner == task) {
+        // 已经锁定
+        mutex->value++;
+        isOk = true;
+    } else if (mutex->owner == nullptr) {
+        // 获取锁
+        mutex->owner = task;
+        mutex->value = 1;
+        isOk         = true;
+    } else {
+        // 等待锁
+        CM_NodeLink_Insert(&mutex->list, CM_NodeLink_End(mutex->list), &task->wait_mutex);
+        task->isWaitMutex = true;
+        mutex->wait_count++;
+    }
+    CO_UnLock();
+    if (isOk)
+        return true;
+    // 等待
+    _Yield(c, timeout);
+    // 移除等待列表
+    CO_Lock();
+    CM_NodeLink_Remove(&mutex->list, &task->wait_mutex);
+    mutex->wait_count--;
+    task->isWaitMutex = false;
+    isOk              = mutex->owner == task;
+    CO_UnLock();
+    return isOk;
+}
+
+static void UnlockMutex(Coroutine_Mutex mutex)
+{
+    CO_Thread *c = GetCurrentThread(-1);
+    if (mutex == nullptr || c == nullptr || c->idx_task == nullptr)
+        return;
+    CO_TCB *task = c->idx_task;
+    CO_Lock();
+    if (mutex->owner == task) {
+        // 解锁
+        mutex->value--;
+        if (mutex->value == 0) {
+            mutex->owner = nullptr;
+            // 唤醒等待队列
+            if (!CM_NodeLink_IsEmpty(mutex->list)) {
+                task             = CM_NodeLink_ToType(CO_TCB, wait_mutex, CM_NodeLink_First(mutex->list));
+                task->execv_time = 0;
+                task->timeout    = 0;
+                mutex->owner     = task;
+                mutex->value     = 1;
+                AddTaskList(task);
+            }
+        }
+    }
+    CO_UnLock();
+    return;
 }
 
 /**
@@ -1368,7 +1536,7 @@ static const char *GetTaskName(Coroutine_TaskId taskId)
 
 static void _ASyncTask(void *obj)
 {
-    Coroutine_ASync *a = (Coroutine_ASync *)obj;
+    Coroutine_ASync a = (Coroutine_ASync)obj;
     if (a->func)
         a->ret = a->func(a->object);
     a->func = nullptr;   // 设置执行完成标志
@@ -1376,7 +1544,7 @@ static void _ASyncTask(void *obj)
     return;
 }
 
-static Coroutine_ASync *ASync(Coroutine_AsyncTask func, void *arg)
+static Coroutine_ASync ASync(Coroutine_AsyncTask func, void *arg)
 {
     if (func == nullptr)
         return nullptr;
@@ -1399,7 +1567,7 @@ static Coroutine_ASync *ASync(Coroutine_AsyncTask func, void *arg)
     return a;
 }
 
-static bool ASyncWait(Coroutine_ASync *async, uint32_t timeout)
+static bool ASyncWait(Coroutine_ASync async, uint32_t timeout)
 {
     if (async == nullptr)
         return false;
@@ -1409,11 +1577,11 @@ static bool ASyncWait(Coroutine_ASync *async, uint32_t timeout)
     return async->func == nullptr;
 }
 
-static void *ASyncGetResultAndDelete(Coroutine_ASync **async_ptr)
+static void *ASyncGetResultAndDelete(Coroutine_ASync *async_ptr)
 {
     if (async_ptr == nullptr || *async_ptr == nullptr)
         return nullptr;
-    Coroutine_ASync *p = *async_ptr;
+    Coroutine_ASync p = *async_ptr;
     if (p->func != nullptr)
         return nullptr;   // 还没执行完
     *async_ptr = nullptr;
@@ -1444,6 +1612,10 @@ const _Coroutine Coroutine = {
     DeleteSemaphore,
     GiveSemaphore,
     WaitSemaphore,
+    CreateMutex,
+    DeleteMutex,
+    LockMutex,
+    UnlockMutex,
     GetMillisecond,
     Malloc,
     Free,

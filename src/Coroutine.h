@@ -61,7 +61,8 @@ typedef struct _CO_Thread *   Coroutine_Handle;      // 协程实例
 typedef struct _CO_TCB *      Coroutine_TaskId;      // 任务id
 typedef struct _CO_Semaphore *Coroutine_Semaphore;   // 信号量
 typedef struct _CO_Mailbox *  Coroutine_Mailbox;     // 邮箱
-typedef struct _CO_ASync      Coroutine_ASync;       // 异步任务
+typedef struct _CO_ASync *    Coroutine_ASync;       // 异步任务
+typedef struct _CO_Mutex *    Coroutine_Mutex;       // 互斥锁(可递归)
 // 任务回调
 typedef void (*Coroutine_Task)(void *obj);
 // 周期回调（用于看门狗）
@@ -348,6 +349,39 @@ typedef struct
                           uint32_t            timeout);
 
     /**
+     * @brief    创建互斥锁
+     * @param    name           名称 最大31字节
+     * @return   Coroutine_Mutex
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-29
+     */
+    Coroutine_Mutex (*CreateMutex)(const char *name);
+
+    /**
+     * @brief    删除互斥锁
+     * @param    mutex          互斥锁
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-29
+     */
+    void (*DeleteMutex)(Coroutine_Mutex mutex);
+
+    /**
+     * @brief    获取互斥锁
+     * @param    mutex          互斥锁
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-29
+     */
+    bool (*LockMutex)(Coroutine_Mutex mutex, uint32_t timeout);
+
+    /**
+     * @brief    释放互斥锁
+     * @param    mutex          互斥锁
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-29
+     */
+    void (*UnlockMutex)(Coroutine_Mutex mutex);
+
+    /**
    * @brief    获取毫秒值
    * @return   const Coroutine_Events*
    * @author   CXS (chenxiangshu@outlook.com)
@@ -391,7 +425,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */
-    Coroutine_ASync *(*ASync)(Coroutine_AsyncTask func, void *arg);
+    Coroutine_ASync (*ASync)(Coroutine_AsyncTask func, void *arg);
 
     /**
      * @brief    等待异步任务完成
@@ -400,7 +434,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */
-    bool (*ASyncWait)(Coroutine_ASync *async, uint32_t timeout);
+    bool (*ASyncWait)(Coroutine_ASync async, uint32_t timeout);
 
     /**
      * @brief    获取异步任务结果，并删除异步任务
@@ -408,7 +442,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */
-    void *(*ASyncGetResultAndDelete)(Coroutine_ASync **async_ptr);
+    void *(*ASyncGetResultAndDelete)(Coroutine_ASync *async_ptr);
 } _Coroutine;
 
 /**

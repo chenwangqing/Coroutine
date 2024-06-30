@@ -7,10 +7,13 @@
 #include <windows.h>
 
 #undef CreateSemaphore
+#undef CreateMutex
+#undef Yield
 
 extern void         PrintMemory(void);
 Coroutine_Semaphore sem1;
 Coroutine_Mailbox   mail1;
+Coroutine_Mutex     lock;
 
 static uint64_t Task1_func1(uint32_t timeout)
 {
@@ -69,8 +72,8 @@ void Task3(void *obj)
         (*a) = Coroutine.GetMillisecond() - now;
         return a;
     };
-    int             *a  = new int(0);
-    Coroutine_ASync *re = nullptr;
+    int            *a  = new int(0);
+    Coroutine_ASync re = nullptr;
     while (true) {
         if (!Coroutine.WaitSemaphore(sem1, 1, 100))
             continue;
@@ -103,6 +106,38 @@ void Task4(void *obj)
     return;
 }
 
+void Task5(void *obj)
+{
+    int *num = (int *)obj;
+    for (int i = 0; i < 100; i++) {
+        while (!Coroutine.LockMutex(lock, 1000000));
+        (*num)++;
+        Coroutine.YieldDelay(100);
+        (*num)++;
+        Coroutine.UnlockMutex(lock);
+    }
+    while (!Coroutine.LockMutex(lock, 1000000));
+    printf("[%llu][5]num = %d\n", Coroutine.GetMillisecond(), *num);
+    Coroutine.UnlockMutex(lock);
+    return;
+}
+
+void Task6(void *obj)
+{
+    int *num = (int *)obj;
+    for (int i = 0; i < 100; i++) {
+        while (!Coroutine.LockMutex(lock, 1000000));
+        (*num)++;
+        Coroutine.YieldDelay(100);
+        (*num)++;
+        Coroutine.UnlockMutex(lock);
+    }
+    while (!Coroutine.LockMutex(lock, 1000000));
+    printf("[%llu][6]num = %d\n", Coroutine.GetMillisecond(), *num);
+    Coroutine.UnlockMutex(lock);
+    return;
+}
+
 DWORD WINAPI ThreadProc(LPVOID lpParam)
 {
     while (true)
@@ -116,13 +151,17 @@ int main()
     auto                          inter = GetInter();
     Coroutine.SetInter(inter);
 
-    sem1  = Coroutine.CreateSemaphore("sem1", 0);
-    mail1 = Coroutine.CreateMailbox("mail1", 1024);
+    sem1    = Coroutine.CreateSemaphore("sem1", 0);
+    mail1   = Coroutine.CreateMailbox("mail1", 1024);
+    lock    = Coroutine.CreateMutex("lock");
+    int num = 0;
 
     Coroutine.AddTask(-1, Task1, nullptr, "Task1");
     Coroutine.AddTask(-1, Task2, nullptr, "Task2");
     Coroutine.AddTask(-1, Task3, nullptr, "Task3");
     Coroutine.AddTask(-1, Task4, nullptr, "Task4");
+    Coroutine.AddTask(-1, Task5, &num, "Task5-1");
+    Coroutine.AddTask(-1, Task6, &num, "Task5-2");
 
     for (int i = 0; i < inter->thread_count; i++) {
         CreateThread(

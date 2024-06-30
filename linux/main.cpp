@@ -67,8 +67,8 @@ void Task3(void *obj)
         (*a) = Coroutine.GetMillisecond() - now;
         return a;
     };
-    int             *a  = new int(0);
-    Coroutine_ASync *re = nullptr;
+    int            *a  = new int(0);
+    Coroutine_ASync re = nullptr;
     while (true) {
         if (!Coroutine.WaitSemaphore(sem1, 1, 100))
             continue;
