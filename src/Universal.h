@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 /// <summary>
-/// 虚拟文件通用接口
+/// 通用接口
 /// </summary>
 typedef struct
 {

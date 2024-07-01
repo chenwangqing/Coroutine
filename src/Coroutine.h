@@ -304,14 +304,6 @@ typedef struct
     int (*PrintInfo)(char *buf, int max_size);
 
     /**
-   * @brief    【内部使用】结束任务(不能再协程外使用)
-   * @param    taskId         任务id
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-16
-   */
-    void (*ExitTask)(Coroutine_TaskId taskId);
-
-    /**
    * @brief    创建信号量
    * @param    name           名称 最大31字节
    * @param    init_val       初始值

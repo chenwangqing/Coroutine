@@ -142,8 +142,8 @@ struct _CO_TCB
     jmp_buf        env;                  // 环境
     uint64_t       execv_time;           // 执行时间
     uint32_t       timeout;              // 超时时间
-    int *          stack;                // 栈缓存
-    int *          p_stack;              // 栈
+    size_t *       stack;                // 栈缓存
+    size_t *       p_stack;              // 栈
     uint32_t       stack_len;            // 当前栈长度
     uint32_t       stack_max;            // 最大长度
     uint32_t       stack_alloc;          // 分配长度
@@ -160,7 +160,7 @@ struct _CO_TCB
     void *         obj;                  // 执行参数
     uint64_t       run_time;             // 运行时间
     CO_Thread *    coroutine;            // 父节点
-    int *          s, *p;                // 临时变量
+    size_t *       s, *p;                // 临时变量
     char *         name;                 // 名称
 
     SemaphoreNode wait_sem;    // 信号等待节点
@@ -186,16 +186,16 @@ struct _CO_TCB
  */
 struct _CO_Thread
 {
-    jmp_buf       env;               // 环境
-    uint64_t      start_time;        // 启动时间
-    uint64_t      run_time;          // 运行时间
-    uint64_t      task_start_time;   // 任务开始时间
-    uint32_t      isRun : 1;         // 运行
-    volatile int *stack;             // 栈
-    CO_TCB *      idx_task;          // 当前任务
-    size_t        ThreadId;          // 当前协程的线程id
-    uint16_t      co_id;             // 协程id
-    uint32_t      task_count;        // 任务数量
+    jmp_buf          env;               // 环境
+    uint64_t         start_time;        // 启动时间
+    uint64_t         run_time;          // 运行时间
+    uint64_t         task_start_time;   // 任务开始时间
+    uint32_t         isRun : 1;         // 运行
+    volatile size_t *stack;             // 栈
+    CO_TCB *         idx_task;          // 当前任务
+    size_t           ThreadId;          // 当前协程的线程id
+    uint16_t         co_id;             // 协程id
+    uint32_t         task_count;        // 任务数量
 
     CM_NodeLinkList_t tasks_run;     // 运行任务列表 CO_TCB
     CM_NodeLinkList_t tasks_sleep;   // 睡眠任务列表 CO_TCB
@@ -433,11 +433,11 @@ static void CheckWatchdog(CO_Thread *coroutine)
 
 static void _enter_into(volatile CO_TCB *n)
 {
-    volatile int __stack = 0x44332211;
+    volatile size_t __stack = 0x44332211;
     // 获取栈起始指针
     if (n->coroutine->stack == nullptr)
-        n->coroutine->stack = (int *)&__stack;   // 不能在后面创建局部变量
-    else if (n->coroutine->stack != (int *)&__stack)
+        n->coroutine->stack = (size_t *)&__stack;   // 不能在后面创建局部变量
+    else if (n->coroutine->stack != (size_t *)&__stack)
         return;   // 栈错误,栈被迁移
     // 保存环境
     int ret = _c_setjmp(n->coroutine->env);
@@ -515,16 +515,16 @@ static void ContextSwitch(volatile CO_TCB *n)
     // 保存环境,回到调度器
     int ret = _c_setjmp(((CO_TCB *)n)->env);
     if (ret == 0) {
-        volatile int __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
+        volatile size_t __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
         // 保存栈数据
-        n->p_stack = ((int *)&__mem);   // 获取栈结尾
+        n->p_stack = ((size_t *)&__mem);   // 获取栈结尾
         n->p_stack -= 4;
         n->stack_len = n->coroutine->stack - n->p_stack;
         if (n->stack_len > n->stack_alloc) {
             if (n->stack != nullptr)
                 Inter.Free(n->stack, __FILE__, __LINE__);
             n->stack_alloc = ALIGN(n->stack_len, 128) * 128;   // 按512字节分配，避免内存碎片
-            n->stack       = (int *)Inter.Malloc(n->stack_alloc * sizeof(int), __FILE__, __LINE__);
+            n->stack       = (size_t *)Inter.Malloc(n->stack_alloc * sizeof(size_t), __FILE__, __LINE__);
         }
         if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
         if (n->stack == nullptr) {
@@ -683,7 +683,7 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
     n->coroutine   = coroutine;
     n->isRun       = true;
     n->isFirst     = true;
-    n->stack       = (int *)Inter.Malloc(128 * sizeof(int), __FILE__, __LINE__);   // 预分配 512 字节
+    n->stack       = (size_t *)Inter.Malloc(128 * sizeof(size_t), __FILE__, __LINE__);   // 预分配 512 字节
     n->stack_alloc = 128;
     CM_NodeLink_Init(&n->link);
     if (name != nullptr && name[0] != '\0') {
@@ -1047,8 +1047,8 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
         int  len = co_snprintf(stack,
                               sizeof(stack),
                               "%u/%u",
-                              p->stack_len * sizeof(int),
-                              p->stack_max * sizeof(int));
+                              p->stack_len * sizeof(size_t),
+                              p->stack_max * sizeof(size_t));
         for (; len < max_stack; len++)
             stack[len] = ' ';
         stack[len] = '\0';
@@ -1236,18 +1236,6 @@ static int PrintInfo(char *buf, int max_size)
 }
 
 /**
- * @brief    结束任务
- * @param    taskId         任务id
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-16
- */
-static void ExitTask(Coroutine_TaskId taskId)
-{
-    _task_exit(taskId, true);
-    return;
-}
-
-/**
  * @brief    创建信号量
  * @param    init_val       初始值
  * @return   Coroutine_Semaphore
@@ -1270,7 +1258,9 @@ static Coroutine_Semaphore CreateSemaphore(const char *name, uint32_t init_val)
     sem->name[s] = '\0';
     // 加入信号列表
     CO_Lock();
-    CM_NodeLink_Insert(&C_Static.semaphores, CM_NodeLink_End(C_Static.semaphores), &sem->link);
+    CM_NodeLink_Insert(&C_Static.semaphores,
+                       CM_NodeLink_End(C_Static.semaphores),
+                       &sem->link);
     CO_UnLock();
     return sem;
 }
@@ -1613,6 +1603,53 @@ static void *ASyncGetResultAndDelete(Coroutine_ASync async_ptr)
     return ret;
 }
 
+static void FeedDog(uint32_t time)
+{
+    CO_Thread *c = GetCurrentThread(-1);
+    if (c == nullptr || c->idx_task == nullptr)
+        return;
+    CO_Lock();
+    CO_TCB *task = c->idx_task;
+    // 从已有的列表中删除
+    CM_NodeLink_Remove(&c->watchdogs, &task->watchdog.link);
+    // 设置超时时间
+    if (time == 0)
+        task->watchdog.expiration_time = 0;
+    else
+        task->watchdog.expiration_time = GetMillisecond() + time;
+    if (task->watchdog.expiration_time) {
+        // 添加到新的列表
+        if (CM_NodeLink_IsEmpty(c->watchdogs)) {
+            CM_NodeLink_Init(&task->watchdog.link);
+            c->watchdogs = &task->watchdog.link;
+        } else {
+            CO_TCB *s = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(c->watchdogs));
+            CO_TCB *e = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_End(c->watchdogs));
+            if (s->watchdog.expiration_time > task->watchdog.expiration_time) {
+                // 添加到头
+                CM_NodeLink_Insert(&c->watchdogs, CM_NodeLink_End(c->watchdogs), &task->watchdog.link);
+                c->watchdogs = &task->watchdog.link;
+            } else if (e->watchdog.expiration_time <= task->watchdog.expiration_time) {
+                // 添加到尾巴
+                CM_NodeLink_Insert(&c->watchdogs, CM_NodeLink_End(c->watchdogs), &task->watchdog.link);
+            } else {
+                // 添加到中间
+                CO_TCB *r = nullptr;
+                CM_NodeLink_Foreach_Positive(CO_TCB, watchdog.link, c->watchdogs, p)
+                {
+                    if (p->watchdog.expiration_time >= task->watchdog.expiration_time) {
+                        r = p;
+                        break;
+                    }
+                }
+                CM_NodeLink_Insert(&c->watchdogs, r->watchdog.link.up, &task->watchdog.link);
+            }
+        }
+    }
+    CO_UnLock();
+    return;
+}
+
 static void Universal_DeleteLock(void *lock)
 {
     DeleteMutex((Coroutine_Mutex)lock);
@@ -1698,55 +1735,9 @@ static const Universal *GetUniversal(void)
         Universal_Async,
         Universal_AsyncWait,
         Universal_AsyncGetResultAndDelete,
+        FeedDog,
     };
     return &universal;
-}
-
-static void FeedDog(uint32_t time)
-{
-    CO_Thread *c = GetCurrentThread(-1);
-    if (c == nullptr || c->idx_task == nullptr)
-        return;
-    CO_Lock();
-    CO_TCB *task = c->idx_task;
-    // 从已有的列表中删除
-    CM_NodeLink_Remove(&c->watchdogs, &task->watchdog.link);
-    // 设置超时时间
-    if (time == 0)
-        task->watchdog.expiration_time = 0;
-    else
-        task->watchdog.expiration_time = GetMillisecond() + time;
-    if (task->watchdog.expiration_time) {
-        // 添加到新的列表
-        if (CM_NodeLink_IsEmpty(c->watchdogs)) {
-            CM_NodeLink_Init(&task->watchdog.link);
-            c->watchdogs = &task->watchdog.link;
-        } else {
-            CO_TCB *s = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(c->watchdogs));
-            CO_TCB *e = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_End(c->watchdogs));
-            if (s->watchdog.expiration_time > task->watchdog.expiration_time) {
-                // 添加到头
-                CM_NodeLink_Insert(&c->watchdogs, CM_NodeLink_End(c->watchdogs), &task->watchdog.link);
-                c->watchdogs = &task->watchdog.link;
-            } else if (e->watchdog.expiration_time <= task->watchdog.expiration_time) {
-                // 添加到尾巴
-                CM_NodeLink_Insert(&c->watchdogs, CM_NodeLink_End(c->watchdogs), &task->watchdog.link);
-            } else {
-                // 添加到中间
-                CO_TCB *r = nullptr;
-                CM_NodeLink_Foreach_Positive(CO_TCB, watchdog.link, c->watchdogs, p)
-                {
-                    if (p->watchdog.expiration_time >= task->watchdog.expiration_time) {
-                        r = p;
-                        break;
-                    }
-                }
-                CM_NodeLink_Insert(&c->watchdogs, r->watchdog.link.up, &task->watchdog.link);
-            }
-        }
-    }
-    CO_UnLock();
-    return;
 }
 
 const _Coroutine Coroutine = {
@@ -1765,7 +1756,6 @@ const _Coroutine Coroutine = {
     SendMail,
     ReceiveMail,
     PrintInfo,
-    ExitTask,
     CreateSemaphore,
     DeleteSemaphore,
     GiveSemaphore,
