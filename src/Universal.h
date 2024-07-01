@@ -33,7 +33,7 @@ typedef struct
 
     // FUNC：Malloc
     // NOTE：内存分配
-    void *(*Malloc)(uint32_t size, const char *file, int line);
+    void *(*Malloc)(size_t size, const char *file, int line);
 
     // FUNC：Free
     // NOTE：内存释放

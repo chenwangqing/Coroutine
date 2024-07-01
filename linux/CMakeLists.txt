@@ -67,7 +67,7 @@ include_directories(${INCLUDE_DIR})
 
 # 输出执行程序
 add_executable(${PROJECT_NAME} ${CODE_SRCS})
-target_link_libraries(${PROJECT_NAME} -static-libgcc -static-libstdc++) # 静态链接到glibc
+# target_link_libraries(${PROJECT_NAME} -static-libgcc -static-libstdc++) # 静态链接到glibc
 target_link_libraries(${PROJECT_NAME} ${EXTRA_LIBS})
 
 # 输出MAP文件
