@@ -36,7 +36,6 @@ static int setjmp(jmp_buf buf)
         mov dword ptr[eax + 20], ecx   // 保存 setjmp 下一个地址
         mov eax, 0   // 默认返回 0
     }
-    return;
 }
 
 /**
@@ -360,7 +359,7 @@ static void AddTaskList(CO_TCB *task)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-06-28
  */
-static uint64_t GetSleepTask(CO_Thread *coroutine, uint64_t ts)
+static uint32_t GetSleepTask(CO_Thread *coroutine, uint64_t ts)
 {
     if (CM_NodeLink_IsEmpty(coroutine->tasks_sleep))
         return 0;
@@ -373,7 +372,7 @@ static uint64_t GetSleepTask(CO_Thread *coroutine, uint64_t ts)
         CM_NodeLink_Insert(&coroutine->tasks_run, CM_NodeLink_End(coroutine->tasks_run), &task->link);
         return 0;
     }
-    return task->execv_time - ts;
+    return task->execv_time >= ts + UINT32_MAX ? UINT32_MAX : task->execv_time - ts;
 }
 
 /**
@@ -441,7 +440,7 @@ static void _Task(CO_Thread *coroutine)
 {
     volatile uint32_t flag1    = 0x55667788;
     volatile CO_TCB * n        = nullptr;
-    volatile uint64_t sleep_ms = UINT64_MAX;
+    volatile uint32_t sleep_ms = UINT32_MAX;
     volatile uint32_t flag2    = 0x55667788;
     coroutine->task_start_time = Inter.GetMillisecond();
     // 获取下一个任务
@@ -632,33 +631,6 @@ static bool Coroutine_RunTick(void)
     _Task(coroutine);
     return coroutine->tasks_run != nullptr;
 }
-
-/**
- * @brief    删除协程
- * @param    c              协程实例
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-16
- */
-#if 0
-static void Coroutine_Delete(Coroutine_Handle c)
-{
-    CO_Thread *coroutine = (CO_Thread *)c;
-    if (coroutine == nullptr)
-        return;
-    CO_Lock();
-    // 删除任务
-    CO_TCB *n = coroutine->tasks;
-    while (n != nullptr) {
-        CO_TCB *t = n;
-        n         = n->next;
-        DeleteTask(t);
-    }
-    CM_NodeLink_Remove(&C_Static.threads, &coroutine->link);
-    CO_UnLock();
-    Inter.Free(coroutine, __FILE__, __LINE__);
-    return;
-}
-#endif
 
 static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
                                 Coroutine_Task func,
@@ -1023,13 +995,13 @@ static Coroutine_MailData *ReceiveMail(Coroutine_Mailbox mb,
     return ret;
 }
 
-static int co_snprintf(char *buf, size_t size, const char *fmt, ...)
+static size_t co_snprintf(char *buf, size_t size, const char *fmt, ...)
 {
     if (buf == nullptr || size == 0)
         return 0;
     va_list args;
     va_start(args, fmt);
-    int len = vsnprintf(buf, size, fmt, args);
+    size_t len = vsnprintf(buf, size, fmt, args);
     va_end(args);
     if (len > size)
         len = size;
@@ -1507,7 +1479,7 @@ static Coroutine_Handle Coroutine_Create(size_t id)
     return c;
 }
 
-static uint64_t GetMillisecond()
+static uint64_t GetMillisecond(void)
 {
     return Inter.GetMillisecond();
 }
@@ -1523,7 +1495,7 @@ static void Free(void *      ptr,
                  const char *file,
                  int         line)
 {
-    Inter.Free(ptr, file, line);
+    if(ptr) Inter.Free(ptr, file, line);
     return;
 }
 
@@ -1592,18 +1564,106 @@ static bool ASyncWait(Coroutine_ASync async, uint32_t timeout)
     return async->func == nullptr;
 }
 
-static void *ASyncGetResultAndDelete(Coroutine_ASync *async_ptr)
+static void *ASyncGetResultAndDelete(Coroutine_ASync async_ptr)
 {
-    if (async_ptr == nullptr || *async_ptr == nullptr)
+    if (async_ptr == nullptr)
         return nullptr;
-    Coroutine_ASync p = *async_ptr;
+    Coroutine_ASync p = async_ptr;
     if (p->func != nullptr)
         return nullptr;   // 还没执行完
-    *async_ptr = nullptr;
-    void *ret  = p->ret;
+    void *ret = p->ret;
     Coroutine.DeleteSemaphore(p->sem);
     Inter.Free(p, __FILE__, __LINE__);
     return ret;
+}
+
+static void Universal_DeleteLock(void *lock)
+{
+    DeleteMutex((Coroutine_Mutex)lock);
+}
+
+static void *Universal_CreateLock(const char *name)
+{
+    return CreateMutex(name);
+}
+
+static bool Universal_Lock(void *obj, uint32_t timeout)
+{
+    return LockMutex((Coroutine_Mutex)obj, timeout);
+}
+
+static void Universal_UnLock(void *mutex)
+{
+    UnlockMutex((Coroutine_Mutex)mutex);
+}
+
+static void *Universal_CreateSemaphore(const char *name, int num)
+{
+    return CreateSemaphore(name, num);
+}
+
+static void Universal_DeleteSemaphore(void *sem)
+{
+    DeleteSemaphore((Coroutine_Semaphore)sem);
+}
+
+static bool Universal_Wait(void *sem, int num, uint32_t time)
+{
+    return WaitSemaphore((Coroutine_Semaphore)sem, num, time);
+}
+
+static void Universal_Give(void *sem, int num)
+{
+    GiveSemaphore((Coroutine_Semaphore)sem, num);
+}
+
+static size_t Universal_RunTask(void (*fun)(void *pars), void *pars, uint32_t stacks, const char *name)
+{
+    return (size_t)Coroutine_AddTask(-1, fun, pars, name);
+}
+
+static size_t Universal_GetTaskId(void)
+{
+    return (size_t)Coroutine_GetTaskId();
+}
+
+static void *Universal_Async(void *(*fun)(void *pars), void *pars, uint32_t stacks)
+{
+    return (void *)ASync(fun, pars);
+}
+
+static bool Universal_AsyncWait(void *async, uint32_t timeout)
+{
+    return ASyncWait((Coroutine_ASync)async, timeout);
+}
+
+static void *Universal_AsyncGetResultAndDelete(void *async)
+{
+    return ASyncGetResultAndDelete((Coroutine_ASync)async);
+}
+
+static const Universal *GetUniversal(void)
+{
+    static const Universal universal = {
+        GetMillisecond,
+        Malloc,
+        Free,
+        Coroutine_YieldTimeOut,
+        Universal_CreateLock,
+        Universal_DeleteLock,
+        Universal_Lock,
+        Universal_UnLock,
+        Universal_CreateSemaphore,
+        Universal_DeleteSemaphore,
+        Universal_Wait,
+        Universal_Give,
+        Universal_RunTask,
+        Universal_GetTaskId,
+        Universal_Async,
+        Universal_AsyncWait,
+        Universal_AsyncGetResultAndDelete,
+    };
+    return &universal;
 }
 
 const _Coroutine Coroutine = {
@@ -1638,4 +1698,5 @@ const _Coroutine Coroutine = {
     ASync,
     ASyncWait,
     ASyncGetResultAndDelete,
+    GetUniversal,
 };

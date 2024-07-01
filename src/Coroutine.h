@@ -52,6 +52,7 @@ CoroutineEx.Delete(coroutine);
 #include <stdio.h>
 #include <string.h>
 #include "NodeLink.h"
+#include "Universal.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -225,7 +226,7 @@ typedef struct
     /**
      * @brief    【外部使用】运行协程(一次运行一个任务)
      * @param    c              协程实例
-     * @return   true           有任务在运行
+     * @return   true           后续还有任务在运行
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-08-17
      */
@@ -425,7 +426,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */
-    Coroutine_ASync (*ASync)(Coroutine_AsyncTask func, void *arg);
+    Coroutine_ASync (*Async)(Coroutine_AsyncTask func, void *arg);
 
     /**
      * @brief    等待异步任务完成
@@ -434,7 +435,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */
-    bool (*ASyncWait)(Coroutine_ASync async, uint32_t timeout);
+    bool (*AsyncWait)(Coroutine_ASync async, uint32_t timeout);
 
     /**
      * @brief    获取异步任务结果，并删除异步任务
@@ -442,7 +443,14 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */
-    void *(*ASyncGetResultAndDelete)(Coroutine_ASync *async_ptr);
+    void *(*AsyncGetResultAndDelete)(Coroutine_ASync async);
+
+    /**
+     * @brief    获取通用接口
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-01
+     */
+    const Universal *(*GetUniversal)(void);
 } _Coroutine;
 
 /**

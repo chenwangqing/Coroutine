@@ -21,8 +21,8 @@ static CRITICAL_SECTION memory_critical_section;
 
 struct
 {
-    uint32_t used;
-    uint32_t max_used;
+    int64_t used;
+    int64_t max_used;
 } memory;
 
 static void _Lock(const char *file, int line)
@@ -39,11 +39,18 @@ static void _Unlock(const char *file, int line)
 
 static void _Free(void *ptr, const char *file, int line)
 {
+    if (ptr == nullptr)
+        return;
     size_t *p = (size_t *)ptr;
     p--;
     EnterCriticalSection(&critical_section);
-    memory.used -= *p + sizeof(size_t);
+    memory.used -= (*p) + sizeof(size_t);
+    if (memory.used < 0)
+    {
+        while (true);
+    }
     LeaveCriticalSection(&critical_section);
+    free(p);
     return;
 }
 
@@ -100,6 +107,6 @@ const Coroutine_Inter *GetInter(void)
 
 void PrintMemory(void)
 {
-    printf("Memory used: %d bytes, max used: %d bytes\n", memory.used, memory.max_used);
+    printf("Memory used: %lld bytes, max used: %lld bytes\n", memory.used, memory.max_used);
     return;
 }

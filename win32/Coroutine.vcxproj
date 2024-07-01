@@ -152,6 +152,7 @@
     <ClInclude Include="..\src\Coroutine.h" />
     <ClInclude Include="..\src\Define.h" />
     <ClInclude Include="..\src\NodeLink.h" />
+    <ClInclude Include="..\src\Universal.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

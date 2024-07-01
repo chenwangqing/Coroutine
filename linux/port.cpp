@@ -43,8 +43,8 @@ typedef struct
 
 struct
 {
-    uint32_t used;
-    uint32_t max_used;
+    int32_t used;
+    int32_t max_used;
 } memory;
 
 void *critical_section        = nullptr;
@@ -89,8 +89,9 @@ static void _Free(void *ptr, const char *file, int line)
     size_t *p = (size_t *)ptr;
     p--;
     __Lock(memory_critical_section);
-    memory.used -= *p + sizeof(size_t);
+    memory.used -= (*p) + sizeof(size_t);
     __UnLock(memory_critical_section);
+    free(p);
     return;
 }
 
