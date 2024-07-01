@@ -72,11 +72,12 @@ void Task3(void *obj)
         int     *a   = (int *)obj;
         uint64_t now = Coroutine.GetMillisecond();
         Sleep(2);
-        Coroutine.YieldDelay(100);
-        (*a) = Coroutine.GetMillisecond() - now;
+        a[1] = (rand() % 150) + 0;
+        Coroutine.YieldDelay(a[1]);
+        a[0] = Coroutine.GetMillisecond() - now;
         return a;
     };
-    int            *a  = new int(0);
+    int            *a  = new int[2];
     Coroutine_ASync re = nullptr;
     while (true) {
         Coroutine.FeedDog(30 * 1000);
@@ -86,7 +87,7 @@ void Task3(void *obj)
         Sleep(1);
         if (re && Coroutine.AsyncWait(re, 100)) {
             int *b = (int *)Coroutine.AsyncGetResultAndDelete(re);
-            printf("[%llu][3]async result: %d\n", Coroutine.GetMillisecond(), *b);
+            printf("[%llu][3]async result: %d/%d\n", Coroutine.GetMillisecond(), b[0],b[1]);
             re = nullptr;
         }
         if (!re)
@@ -116,7 +117,8 @@ void Task4(void *obj)
 
 void Task5(void *obj)
 {
-    int *num = (int *)obj;
+    uint64_t ts  = Coroutine.GetMillisecond();
+    int     *num = (int *)obj;
     for (int i = 0; i < 100; i++) {
         Coroutine.FeedDog(30 * 1000);
         while (!Coroutine.LockMutex(lock, 1000000));
@@ -124,26 +126,33 @@ void Task5(void *obj)
         Coroutine.YieldDelay(100);
         (*num)++;
         Coroutine.UnlockMutex(lock);
+        Coroutine.Yield();
     }
     while (!Coroutine.LockMutex(lock, 1000000));
-    printf("[%llu][5]num = %d\n", Coroutine.GetMillisecond(), *num);
+    ts = Coroutine.GetMillisecond() - ts;
+    printf("[%llu][5]----------------------- num = %d %llu -----------------------\n", Coroutine.GetMillisecond(), *num, ts);
     Coroutine.UnlockMutex(lock);
     return;
 }
 
 void Task6(void *obj)
 {
-    int *num = (int *)obj;
+    uint64_t ts  = Coroutine.GetMillisecond();
+    int     *num = (int *)obj;
     for (int i = 0; i < 100; i++) {
         Coroutine.FeedDog(30 * 1000);
         while (!Coroutine.LockMutex(lock, 1000000));
         (*num)++;
+        while (!Coroutine.LockMutex(lock, 1000000));
         Coroutine.YieldDelay(100);
+        Coroutine.UnlockMutex(lock);
         (*num)++;
         Coroutine.UnlockMutex(lock);
+        Coroutine.Yield();
     }
     while (!Coroutine.LockMutex(lock, 1000000));
-    printf("[%llu][6]num = %d\n", Coroutine.GetMillisecond(), *num);
+    ts = Coroutine.GetMillisecond() - ts;
+    printf("[%llu][6]----------------------- num = %d %llu -----------------------\n", Coroutine.GetMillisecond(), *num, ts);
     Coroutine.UnlockMutex(lock);
     return;
 }
@@ -161,18 +170,6 @@ int main()
     auto                          inter = GetInter();
     Coroutine.SetInter(inter);
 
-    sem1    = Coroutine.CreateSemaphore("sem1", 0);
-    mail1   = Coroutine.CreateMailbox("mail1", 1024);
-    lock    = Coroutine.CreateMutex("lock");
-    int num = 0;
-
-    Coroutine.AddTask(-1, Task1, nullptr, "Task1");
-    Coroutine.AddTask(-1, Task2, nullptr, "Task2");
-    Coroutine.AddTask(-1, Task3, nullptr, "Task3");
-    Coroutine.AddTask(-1, Task4, nullptr, "Task4");
-    Coroutine.AddTask(-1, Task5, &num, "Task5-1");
-    Coroutine.AddTask(-1, Task6, &num, "Task5-2");
-
     for (int i = 0; i < inter->thread_count; i++) {
         CreateThread(
             NULL,         // 默认安全属性
@@ -182,6 +179,24 @@ int main()
             0,            // 使用默认创建标志
             NULL);        // 返回线程ID
     }
+
+    sem1    = Coroutine.CreateSemaphore("sem1", 0);
+    mail1   = Coroutine.CreateMailbox("mail1", 1024);
+    lock    = Coroutine.CreateMutex("lock");
+    int num = 0;
+
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(-1, Task1, nullptr, TASK_PRI_NORMAL, "Task1");
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(-1, Task2, nullptr, TASK_PRI_NORMAL, "Task2");
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(-1, Task3, nullptr, TASK_PRI_NORMAL, "Task3");
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(-1, Task4, nullptr, TASK_PRI_NORMAL, "Task4");
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(-1, Task5, &num, TASK_PRI_LOWEST, "Task5-1");
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(-1, Task6, &num, TASK_PRI_NORMAL, "Task5-2");
 
     while (true) {
         Sleep(100);

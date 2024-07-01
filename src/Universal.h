@@ -22,6 +22,15 @@
 extern "C" {
 #endif
 
+enum
+{
+    TASK_PRI_HIGHEST      = 0,   // 最高优先级
+    TASK_PRI_ABOVE_NORMAL = 1,   // 次高优先级
+    TASK_PRI_NORMAL       = 2,   // 正常优先级
+    TASK_PRI_BELOW_NORMAL = 3,   // 次低优先级
+    TASK_PRI_LOWEST       = 4    // 最低优先级
+};
+
 /// <summary>
 /// 通用接口
 /// </summary>
@@ -88,9 +97,14 @@ typedef struct
     // PARS：fun 任务函数
     // PARS：pars 参数
     // PARS: stacks 堆栈大小 0：默认大小
+    // PARS: pri 优先级 TASK_PRI_LOWEST ~ TASK_PRI_HIGHEST
     // PARS: name 任务名称
     // RETV：任务ID  0: 表示失败
-    size_t (*RunTask)(void (*fun)(void *pars), void *pars, uint32_t stacks, const char *name);
+    size_t (*RunTask)(void (*fun)(void *pars),
+                      void *      pars,
+                      uint32_t    stacks,
+                      uint8_t     pri,
+                      const char *name);
 
     // FUNC：GetTaskId
     // NOTE：获取当前任务ID / 线程id

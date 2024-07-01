@@ -25,7 +25,7 @@
  * <tr><td>2024-06-26 <td>1.12    <td>CXS    <td>添加Coroutine_Inter
  * <tr><td>2024-06-27 <td>1.13    <td>CXS    <td>修正一些任务切换的错误；添加邮箱通信
  * <tr><td>2024-06-28 <td>1.14    <td>CXS    <td>取消显示协程控制器，自动根据线程id分配控制器
- * <tr><td>2024-07-01 <td>1.15    <td>CXS    <td>添加看门狗
+ * <tr><td>2024-07-01 <td>1.15    <td>CXS    <td>添加看门狗；添加优先级
  * </table>
  *
  * @note
@@ -181,12 +181,17 @@ typedef struct
    * @param    co_idx         协程索引 小于SetInter设置的线程数量 -1: 随机分配
    * @param    func           执行函数
    * @param    pars           执行参数
+   * @param    pri            优先级  TASK_PRI_LOWEST ~ TASK_PRI_HIGHEST
    * @param    name           任务名称 最大31字节
    * @return   int            协程id NULL：创建失败
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-15
    */
-    Coroutine_TaskId (*AddTask)(int co_idx, Coroutine_Task func, void *pars, const char *name);
+    Coroutine_TaskId (*AddTask)(int            co_idx,
+                                Coroutine_Task func,
+                                void *         pars,
+                                uint8_t        pri,
+                                const char *   name);
 
     /**
    * @brief    获取当前任务id
