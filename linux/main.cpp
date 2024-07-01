@@ -23,6 +23,7 @@ void Task1(void *obj)
     int   i       = 0;
     char *str_buf = new char[4 * 1024];
     while (true) {
+        Coroutine.FeedDog(10 * 1000);
         PrintMemory();
         std::string str = "hello";
         int         ms  = (rand() % 750) + 250;
@@ -46,6 +47,7 @@ void Task2(void *obj)
     int i = 0;
     printf("start: %llx", Coroutine.GetMillisecond());
     while (true) {
+        Coroutine.FeedDog(10 * 1000);
         std::string str = "hello";
         uint64_t    ts  = Coroutine.GetMillisecond();
         int         ms  = (rand() % 250) + 250;
