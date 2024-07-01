@@ -202,7 +202,7 @@ typedef struct
     Coroutine_TaskId (*GetCurrentTaskId)(void);
 
     /**
-     * @brief    获取当前协程索引
+     * @brief    获取当前协程索引 从0开始递增
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */

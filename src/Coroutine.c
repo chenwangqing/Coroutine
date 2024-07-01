@@ -120,18 +120,19 @@ struct _CO_Semaphore
     char              name[32];     // 名称
     CM_NodeLinkList_t list;         // 等待列表 _SemaphoreNode
     uint32_t          value;        // 信号值
-    uint32_t          wait_count;   // 等待数量
+    uint32_t          wait_count;   // 等待数
     CM_NodeLink_t     link;         // _CO_Semaphore
 };
 
 struct _CO_Mutex
 {
     char              name[32];
-    CM_NodeLinkList_t list;         // 等待列表 _CO_TCB
-    uint32_t          value;        // 互斥值
-    uint32_t          wait_count;   // 等待数量
-    CM_NodeLink_t     link;         // _CO_Mutex
-    CO_TCB *          owner;        // 持有者
+    CM_NodeLinkList_t list;            // 等待列表 _CO_TCB
+    uint32_t          value;           // 互斥值
+    uint32_t          wait_count;      // 等待数量
+    uint32_t          max_wait_time;   // 最大等待时间
+    CM_NodeLink_t     link;            // _CO_Mutex
+    CO_TCB *          owner;           // 持有者
 };
 
 /**
@@ -238,13 +239,12 @@ static Coroutine_Inter Inter;   // 外部接口
 
 static struct
 {
-    CM_NodeLinkList_t threads;       // 协程控制器列表
-    CM_NodeLinkList_t semaphores;    // 信号列表
-    CM_NodeLinkList_t mailboxes;     // 邮箱列表
-    CM_NodeLinkList_t mutexes;       // 互斥列表 _CO_Mutex
-    CO_Thread **      coroutines;    // 协程控制器
-    volatile CO_TCB **tasks_map;     // 任务映射表 根据协程id 用于上下文切换
-    uint16_t          alloc_co_id;   // 协程id
+    CM_NodeLinkList_t threads;      // 协程控制器列表
+    CM_NodeLinkList_t semaphores;   // 信号列表
+    CM_NodeLinkList_t mailboxes;    // 邮箱列表
+    CM_NodeLinkList_t mutexes;      // 互斥列表 _CO_Mutex
+    CO_Thread **      coroutines;   // 协程控制器
+    volatile CO_TCB **tasks_map;    // 任务映射表 根据协程id 用于上下文切换
 } C_Static;
 
 #define CO_Lock()                       \
@@ -515,7 +515,7 @@ static void _Task(CO_Thread *coroutine)
     coroutine->idx_task = nullptr;
     // 添加到运行列表
     CO_Lock();
-    AddTaskList((CO_TCB*)n, n->priority);
+    AddTaskList((CO_TCB *)n, n->priority);
     CO_UnLock();
     // 周期事件
     if (Inter.events->Period != nullptr)
@@ -1217,6 +1217,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "Owner           ");
     idx += co_snprintf(buf + idx, max_size - idx, "Value   ");
     idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
+    idx += co_snprintf(buf + idx, max_size - idx, "MaxWaitTime");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
     CM_NodeLink_Foreach_Positive(CO_Mutex, link, C_Static.mutexes, m)
@@ -1226,6 +1227,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%p ", m->owner);
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", m->value);
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", m->wait_count);
+        idx += co_snprintf(buf + idx, max_size - idx, "%u ", m->max_wait_time);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
     CO_UnLock();
@@ -1310,9 +1312,11 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
         // 移除等待列表
         CM_NodeLink_Remove(&sem->list, &n->link);
         // 开始执行
-        CO_TCB *task     = (CO_TCB *)n->task;
+        CO_TCB *task = (CO_TCB *)n->task;
+        // 清除等待标志
         task->execv_time = 0;
         task->timeout    = 0;
+        // 加入运行列表
         AddTaskList(task, task->priority);
         CO_UnLock();
         // 唤醒
@@ -1467,7 +1471,8 @@ static void UnlockMutex(Coroutine_Mutex mutex)
     CO_Thread *c = GetCurrentThread(-1);
     if (mutex == nullptr || c == nullptr || c->idx_task == nullptr)
         return;
-    CO_TCB *task = c->idx_task;
+    CO_TCB *task   = c->idx_task;
+    bool    isWait = false;
     CO_Lock();
     if (mutex->owner == task) {
         // 解锁
@@ -1479,20 +1484,36 @@ static void UnlockMutex(Coroutine_Mutex mutex)
             mutex->owner = nullptr;
             // 唤醒等待队列
             if (!CM_NodeLink_IsEmpty(mutex->list)) {
-                task              = CM_NodeLink_ToType(CO_TCB,
+                task = CM_NodeLink_ToType(CO_TCB,
                                           wait_mutex.link,
                                           CM_NodeLink_First(mutex->list));
+                // 计数等待时间
+                uint64_t tv  = task->execv_time - task->timeout;
+                uint64_t now = Inter.GetMillisecond();
+                if (now <= tv)
+                    tv = 0;
+                else
+                    tv = now - tv;
+                // 清除等待标志
                 task->execv_time  = 0;
                 task->timeout     = 0;
                 task->isWaitMutex = false;
                 mutex->owner      = task;
                 mutex->value      = 1;
                 mutex->wait_count--;
+                // 加入等待列表
                 AddTaskList(task, task->priority);
+                // 获取最大等待时间
+                if (mutex->max_wait_time < tv)
+                    mutex->max_wait_time = tv;
+                isWait = true;
             }
         }
     }
     CO_UnLock();
+    // 唤醒
+    if (isWait && Inter.events->wake != nullptr)
+        Inter.events->wake(Inter.events->object);
     return;
 }
 
