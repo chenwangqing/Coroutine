@@ -117,6 +117,12 @@ typedef struct
     // PARS：async 异步对象
     // RETV：结果
     void *(*AsyncGetResultAndDelete)(void *async);
+
+    // FUNC：FeedDog
+    // NOTE：喂狗
+    // PARS：timeout 超时时间 ms 0：禁用看门狗
+    // NOTE：用于定时喂狗，防止死锁
+    void (*FeedDog)(uint32_t timeout);
 } Universal;
 #ifdef __cplusplus
 }

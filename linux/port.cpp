@@ -132,6 +132,14 @@ void Sleep(uint32_t time)
     return;
 }
 
+static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, const char *name)
+{
+    while (true) {
+        printf("\nWatchdogTimeout: %p %s\n", taskId, name);
+        Sleep(1000);
+    }
+}
+
 static Coroutine_Events events = {
     nullptr,
     nullptr,
@@ -141,6 +149,7 @@ static Coroutine_Events events = {
         return;
     },
     nullptr,
+    Coroutine_WatchdogTimeout,
 };
 
 static const Coroutine_Inter Inter = {

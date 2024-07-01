@@ -18,6 +18,8 @@ void CM_NodeLink_Insert(CM_NodeLinkList_t *head, CM_NodeLink_t *node, CM_NodeLin
 
 CM_NodeLink_t *CM_NodeLink_Remove(CM_NodeLinkList_t *list, CM_NodeLink_t *link)
 {
+    if (link->next == nullptr || link->up == nullptr)
+        return nullptr;
     CM_NodeLink_t *next = link->next;
     if (link == *list)
         (*list) = link->next;

@@ -2,7 +2,7 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.14
+ * @version  1.15
  * @date     2022-08-15
  *
  * @copyright Copyright (c) 2022  Four-Faith
@@ -25,26 +25,27 @@
  * <tr><td>2024-06-26 <td>1.12    <td>CXS    <td>添加Coroutine_Inter
  * <tr><td>2024-06-27 <td>1.13    <td>CXS    <td>修正一些任务切换的错误；添加邮箱通信
  * <tr><td>2024-06-28 <td>1.14    <td>CXS    <td>取消显示协程控制器，自动根据线程id分配控制器
+ * <tr><td>2024-07-01 <td>1.15    <td>CXS    <td>添加看门狗
  * </table>
  *
  * @note
 
-Coroutine_Handle coroutine = CoroutineEx.Create(inter,false);
-CoroutineEx.SetEvent(coroutine, &events);
-// 添加任务
-CoroutineEx.AddTask(coroutine, test5_task, NULL, 0);
-CoroutineEx.AddTask(coroutine, test6_task, NULL, 0);
-CoroutineEx.AddTask(coroutine, test7_task, NULL, 0);
-// 等待执行完成
-while (CoroutineEx.RunTick(coroutine))
-    ;
-// 删除协程
-CoroutineEx.Delete(coroutine);
+Coroutine.SetInter(inter);
+
+sem1    = Coroutine.CreateSemaphore("sem1", 0);
+mail1   = Coroutine.CreateMailbox("mail1", 1024);
+lock    = Coroutine.CreateMutex("lock");
+
+Coroutine.AddTask(-1, Task1, nullptr, "Task1");
+
+while (true)
+    Coroutine.RunTick();
 
 !!!!!!!!!!!!! 注意 !!!!!!!!!!!!!
 1. 禁止将局部变量跨任务使用，因为是共享栈，切换不同任务就会改变栈上的内容
 2. 不要在栈上分配一个很大的局部变量，这个会导致任务切换时间变长
 */
+
 #ifndef __Coroutine_H__
 #define __Coroutine_H__
 #include <stdbool.h>
@@ -76,6 +77,8 @@ typedef void (*Coroutine_Idle_Event)(uint32_t time, void *object);
 typedef void (*Coroutine_Wake_Event)(void *object);
 // 异步任务
 typedef void *(*Coroutine_AsyncTask)(void *arg);
+// 任务看门狗超时事件
+typedef void (*Coroutine_WatchdogTimeout_Event)(void *object, Coroutine_TaskId taskId, const char *name);
 
 /**
  * @brief    协程事件
@@ -84,11 +87,12 @@ typedef void *(*Coroutine_AsyncTask)(void *arg);
  */
 typedef struct
 {
-    void *                     object;       // 用户对象
-    Coroutine_Period_Event     Period;       // 周期事件
-    Coroutine_Allocation_Event Allocation;   // 分配失败事件
-    Coroutine_Idle_Event       Idle;         // 空闲事件
-    Coroutine_Wake_Event       wake;         // 唤醒事件
+    void *                          object;            // 用户对象
+    Coroutine_Period_Event          Period;            // 周期事件
+    Coroutine_Allocation_Event      Allocation;        // 分配失败事件
+    Coroutine_Idle_Event            Idle;              // 空闲事件
+    Coroutine_Wake_Event            wake;              // 唤醒事件
+    Coroutine_WatchdogTimeout_Event watchdogTimeout;   // 看门狗超时事件
 } Coroutine_Events;
 
 // 协程接口
@@ -451,6 +455,14 @@ typedef struct
      * @date     2024-07-01
      */
     const Universal *(*GetUniversal)(void);
+
+    /**
+     * @brief    喂狗
+     * @param    timeout        喂狗超时 0：禁用看门狗
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-01
+     */
+    void (*FeedDog)(uint32_t timeout);
 } _Coroutine;
 
 /**

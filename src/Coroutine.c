@@ -163,7 +163,6 @@ struct _CO_TCB
     int *          s, *p;                // 临时变量
     char *         name;                 // 名称
 
-
     SemaphoreNode wait_sem;    // 信号等待节点
     MailWaitNode  wait_mail;   // 邮件等待节点
     struct                     //
@@ -171,6 +170,11 @@ struct _CO_TCB
         CM_NodeLink_t link;    // _CO_TCB
         CO_Mutex *    mutex;   // 等待互斥锁
     } wait_mutex;              // 等待互斥锁节点
+    struct
+    {
+        CM_NodeLink_t link;              // _CO_TCB
+        uint64_t      expiration_time;   // 看门狗过期时间 0：不启用
+    } watchdog;
 
     CM_NodeLink_t link;   // _CO_TCB
 };
@@ -196,6 +200,7 @@ struct _CO_Thread
     CM_NodeLinkList_t tasks_run;     // 运行任务列表 CO_TCB
     CM_NodeLinkList_t tasks_sleep;   // 睡眠任务列表 CO_TCB
     CM_NodeLinkList_t tasks_stop;    // 停止列表 CO_TCB
+    CM_NodeLinkList_t watchdogs;     // 看门狗列表 CO_TCB 从小到大
 
     CM_NodeLink_t link;   // _CO_Thread
 };
@@ -281,6 +286,9 @@ static void DeleteTask(CO_TCB *t)
         CM_NodeLink_Remove(&t->wait_mutex.mutex->list, &t->wait_mutex.link);
         t->isWaitMutex = 0;
     }
+    // 移除看门狗
+    if (t->watchdog.expiration_time)
+        CM_NodeLink_Remove(&t->coroutine->watchdogs, &t->watchdog.link);
     // 释放名称
     if (t->name) Inter.Free(t->name, __FILE__, __LINE__);
     // 释放堆栈
@@ -404,6 +412,25 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
     return task;
 }
 
+/**
+ * @brief    检查看门狗
+ * @param    coroutine      
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-01
+ */
+static void CheckWatchdog(CO_Thread *coroutine)
+{
+    if (CM_NodeLink_IsEmpty(coroutine->watchdogs))
+        return;
+    CO_TCB *t = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(coroutine->watchdogs));
+    if (t->watchdog.expiration_time < Inter.GetMillisecond()) {
+        // 看门狗超时
+        if (Inter.events->watchdogTimeout != nullptr)
+            Inter.events->watchdogTimeout(Inter.events->object, t, t->name);
+    }
+    return;
+}
+
 static void _enter_into(volatile CO_TCB *n)
 {
     volatile int __stack = 0x44332211;
@@ -446,6 +473,7 @@ static void _Task(CO_Thread *coroutine)
     coroutine->task_start_time = Inter.GetMillisecond();
     // 获取下一个任务
     CO_Lock();
+    CheckWatchdog(coroutine);
     sleep_ms = GetSleepTask(coroutine, coroutine->task_start_time);
     GetNextTask(coroutine);
     n = coroutine->idx_task;
@@ -1058,6 +1086,11 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
         idx += co_snprintf(buf + idx, max_size - idx, "%-10u ", (uint32_t)(p->execv_time == 0 || p->execv_time <= ts ? 0 : p->execv_time - ts));
         if (idx >= max_size)
             break;
+        uint64_t tv = p->watchdog.expiration_time - Inter.GetMillisecond();
+        if (tv >= UINT32_MAX || p->watchdog.expiration_time == 0)
+            idx += co_snprintf(buf + idx, max_size - idx, "----     ");
+        else
+            idx += co_snprintf(buf + idx, max_size - idx, "%-10u ", (uint32_t)tv);
         idx += co_snprintf(buf + idx, max_size - idx, "%-32s", p->name == nullptr ? "" : p->name);
         if (idx >= max_size)
             break;
@@ -1085,11 +1118,11 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     if (sizeof(size_t) == 4)
         idx += co_snprintf(buf + idx, max_size - idx, " TaskId  ");
     else
-        idx += co_snprintf(buf + idx, max_size - idx, "    TaskId     ");
+        idx += co_snprintf(buf + idx, max_size - idx, "    TaskId      ");
     if (sizeof(size_t) == 4)
         idx += co_snprintf(buf + idx, max_size - idx, " Func    ");
     else
-        idx += co_snprintf(buf + idx, max_size - idx, "     Func      ");
+        idx += co_snprintf(buf + idx, max_size - idx, "     Func       ");
     idx += co_snprintf(buf + idx, max_size - idx, "Status ");
     // 打印堆栈大小
     int max_stack = 13;
@@ -1102,7 +1135,9 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     for (int i = 7; i < max_run; i++)
         buf[idx++] = ' ';
     // 打印等待时间
-    idx += co_snprintf(buf + idx, max_size - idx, " WaitTime  ");
+    idx += co_snprintf(buf + idx, max_size - idx, "WaitTime   ");
+    // 打印看门狗时间
+    idx += co_snprintf(buf + idx, max_size - idx, "DogTime   ");
     // 打印名称
     idx += co_snprintf(buf + idx, max_size - idx, " Name");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
@@ -1142,53 +1177,53 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     // ----------------------------- 信号 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
-    idx += co_snprintf(buf + idx, max_size - idx, " Value  ");
-    idx += co_snprintf(buf + idx, max_size - idx, " Wait   ");
+    idx += co_snprintf(buf + idx, max_size - idx, "Value   ");
+    idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     int sn = 0;
     CM_NodeLink_Foreach_Positive(CO_Semaphore, link, C_Static.semaphores, s)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-32s", s->name);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", s->value);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", s->wait_count);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-31s ", s->name);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", s->value);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", s->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
     // ----------------------------- 邮箱 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
-    idx += co_snprintf(buf + idx, max_size - idx, " used   ");
-    idx += co_snprintf(buf + idx, max_size - idx, " total  ");
-    idx += co_snprintf(buf + idx, max_size - idx, " Wait   ");
+    idx += co_snprintf(buf + idx, max_size - idx, "used    ");
+    idx += co_snprintf(buf + idx, max_size - idx, "total   ");
+    idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
     CM_NodeLink_Foreach_Positive(CO_Mailbox, link, C_Static.mailboxes, mb)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-32s", mb->name);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", mb->total - mb->size);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", mb->total);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", mb->wait_count);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-31s ", mb->name);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->total - mb->size);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->total);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
     // ----------------------------- 互斥 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
     if (sizeof(size_t) == 4)
-        idx += co_snprintf(buf + idx, max_size - idx, "  Owner  ");
+        idx += co_snprintf(buf + idx, max_size - idx, "Owner   ");
     else
-        idx += co_snprintf(buf + idx, max_size - idx, "     Owner     ");
-    idx += co_snprintf(buf + idx, max_size - idx, "  Value  ");
-    idx += co_snprintf(buf + idx, max_size - idx, " Wait   ");
+        idx += co_snprintf(buf + idx, max_size - idx, "Owner           ");
+    idx += co_snprintf(buf + idx, max_size - idx, "Value   ");
+    idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
     CM_NodeLink_Foreach_Positive(CO_Mutex, link, C_Static.mutexes, m)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-32s", m->name);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-31s ", m->name);
         idx += co_snprintf(buf + idx, max_size - idx, "%p ", m->owner);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", m->value);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-8u", m->wait_count);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", m->value);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", m->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
     CO_UnLock();
@@ -1667,6 +1702,53 @@ static const Universal *GetUniversal(void)
     return &universal;
 }
 
+static void FeedDog(uint32_t time)
+{
+    CO_Thread *c = GetCurrentThread(-1);
+    if (c == nullptr || c->idx_task == nullptr)
+        return;
+    CO_Lock();
+    CO_TCB *task = c->idx_task;
+    // 从已有的列表中删除
+    CM_NodeLink_Remove(&c->watchdogs, &task->watchdog.link);
+    // 设置超时时间
+    if (time == 0)
+        task->watchdog.expiration_time = 0;
+    else
+        task->watchdog.expiration_time = GetMillisecond() + time;
+    if (task->watchdog.expiration_time) {
+        // 添加到新的列表
+        if (CM_NodeLink_IsEmpty(c->watchdogs)) {
+            CM_NodeLink_Init(&task->watchdog.link);
+            c->watchdogs = &task->watchdog.link;
+        } else {
+            CO_TCB *s = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(c->watchdogs));
+            CO_TCB *e = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_End(c->watchdogs));
+            if (s->watchdog.expiration_time > task->watchdog.expiration_time) {
+                // 添加到头
+                CM_NodeLink_Insert(&c->watchdogs, CM_NodeLink_End(c->watchdogs), &task->watchdog.link);
+                c->watchdogs = &task->watchdog.link;
+            } else if (e->watchdog.expiration_time <= task->watchdog.expiration_time) {
+                // 添加到尾巴
+                CM_NodeLink_Insert(&c->watchdogs, CM_NodeLink_End(c->watchdogs), &task->watchdog.link);
+            } else {
+                // 添加到中间
+                CO_TCB *r = nullptr;
+                CM_NodeLink_Foreach_Positive(CO_TCB, watchdog.link, c->watchdogs, p)
+                {
+                    if (p->watchdog.expiration_time >= task->watchdog.expiration_time) {
+                        r = p;
+                        break;
+                    }
+                }
+                CM_NodeLink_Insert(&c->watchdogs, r->watchdog.link.up, &task->watchdog.link);
+            }
+        }
+    }
+    CO_UnLock();
+    return;
+}
+
 const _Coroutine Coroutine = {
     SetInter,
     Coroutine_AddTask,
@@ -1700,4 +1782,5 @@ const _Coroutine Coroutine = {
     ASyncWait,
     ASyncGetResultAndDelete,
     GetUniversal,
+    FeedDog,
 };

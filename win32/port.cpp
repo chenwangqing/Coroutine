@@ -45,8 +45,7 @@ static void _Free(void *ptr, const char *file, int line)
     p--;
     EnterCriticalSection(&critical_section);
     memory.used -= (*p) + sizeof(size_t);
-    if (memory.used < 0)
-    {
+    if (memory.used < 0) {
         while (true);
     }
     LeaveCriticalSection(&critical_section);
@@ -76,6 +75,14 @@ static size_t GetThreadId(void)
     return GetCurrentThreadId();
 }
 
+static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, const char *name)
+{
+    while (true) {
+        printf("\nWatchdogTimeout: %p %s\n", taskId, name);
+        Sleep(1000);
+    }
+}
+
 static Coroutine_Events events = {
     nullptr,
     nullptr,
@@ -85,6 +92,7 @@ static Coroutine_Events events = {
         return;
     },
     nullptr,
+    Coroutine_WatchdogTimeout,
 };
 
 static const Coroutine_Inter Inter = {

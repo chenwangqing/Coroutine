@@ -28,6 +28,7 @@ void Task1(void *obj)
     int   i       = 0;
     char *str_buf = new char[4 * 1024];
     while (true) {
+        Coroutine.FeedDog(30 * 1000);
         PrintMemory();
         std::string str = "hello";
         int         ms  = (rand() % 750) + 250;
@@ -51,6 +52,7 @@ void Task2(void *obj)
     int i = 0;
     printf("start: %llx", Coroutine.GetMillisecond());
     while (true) {
+        Coroutine.FeedDog(30 * 1000);
         std::string str = "hello";
         int         ms  = (rand() % 250) + 250;
         uint64_t    ts  = Coroutine.GetMillisecond();
@@ -77,6 +79,7 @@ void Task3(void *obj)
     int            *a  = new int(0);
     Coroutine_ASync re = nullptr;
     while (true) {
+        Coroutine.FeedDog(30 * 1000);
         if (!Coroutine.WaitSemaphore(sem1, 1, 100))
             continue;
         printf("[%llu][3]sem1 signal\n", Coroutine.GetMillisecond());
@@ -95,6 +98,7 @@ void Task3(void *obj)
 void Task4(void *obj)
 {
     while (true) {
+        Coroutine.FeedDog(30 * 1000);
         int ms = (rand() % 250) + 250;
         Coroutine.YieldDelay(ms);
         auto data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
@@ -114,6 +118,7 @@ void Task5(void *obj)
 {
     int *num = (int *)obj;
     for (int i = 0; i < 100; i++) {
+        Coroutine.FeedDog(30 * 1000);
         while (!Coroutine.LockMutex(lock, 1000000));
         (*num)++;
         Coroutine.YieldDelay(100);
@@ -130,6 +135,7 @@ void Task6(void *obj)
 {
     int *num = (int *)obj;
     for (int i = 0; i < 100; i++) {
+        Coroutine.FeedDog(30 * 1000);
         while (!Coroutine.LockMutex(lock, 1000000));
         (*num)++;
         Coroutine.YieldDelay(100);
