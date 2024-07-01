@@ -73,8 +73,8 @@ typedef void (*Coroutine_Period_Event)(void *object);
 typedef void (*Coroutine_Allocation_Event)(int line, size_t size, void *object);
 // 空闲事件（可用于低功耗休眠）
 typedef void (*Coroutine_Idle_Event)(uint32_t time, void *object);
-// 空闲唤醒
-typedef void (*Coroutine_Wake_Event)(void *object);
+// 线程空闲唤醒
+typedef void (*Coroutine_Wake_Event)(uint16_t co_id, void *object);
 // 异步任务
 typedef void *(*Coroutine_AsyncTask)(void *arg);
 // 任务看门狗超时事件
@@ -202,7 +202,7 @@ typedef struct
     Coroutine_TaskId (*GetCurrentTaskId)(void);
 
     /**
-     * @brief    获取当前协程索引 从0开始递增
+     * @brief    获取当前协程索引 从0开始递增 返回 0xFFFF 表示没有当前协程
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */

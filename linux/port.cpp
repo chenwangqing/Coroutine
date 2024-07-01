@@ -35,6 +35,7 @@
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <netinet/tcp.h>
+#include <semaphore.h>
 
 typedef struct
 {
@@ -140,20 +141,42 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
     }
 }
 
+#define MAX_THREADS 3
+
+static sem_t sem_sleep[MAX_THREADS];
+static bool  is_sem_sleep[MAX_THREADS];
+
+
 static Coroutine_Events events = {
     nullptr,
     nullptr,
     nullptr,
     [](uint32_t time, void *object) -> void {
-        Sleep(1);
+        // Sleep(1); 模拟休眠
+        int idx = Coroutine.GetCurrentCoroutineIdx();
+        EnterCriticalSection(&critical_section);
+        is_sem_sleep[idx] = 1;
+        LeaveCriticalSection(&critical_section);
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += time / 1000;   // 设置超时时间为当前时间 + 10 秒
+        ts.tv_nsec += (time % 1000) * 1000000;
+        sem_timedwait(&sem_sleep[idx], &ts);
         return;
     },
-    nullptr,
+    [](uint16_t co_id, void *object) -> void {
+        EnterCriticalSection(&critical_section);
+        bool isWait = is_sem_sleep[co_id];
+        LeaveCriticalSection(&critical_section);
+        if (isWait)
+            sem_post(&sem_sleep[co_id]);
+        return;
+    },
     Coroutine_WatchdogTimeout,
 };
 
 static const Coroutine_Inter Inter = {
-    3,
+    MAX_THREADS,
     _Lock,
     _Unlock,
     _Malloc,
@@ -167,6 +190,10 @@ const Coroutine_Inter *GetInter(void)
 {
     critical_section        = __CreateLock();
     memory_critical_section = __CreateLock();
+    for (int i = 0; i < MAX_THREADS; i++) {
+        is_sem_sleep[i] = false;
+        sem_init(&sem_sleep[i], 0, 0);
+    }
     return &Inter;
 }
 

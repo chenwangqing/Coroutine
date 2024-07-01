@@ -222,6 +222,7 @@ struct _CO_Mailbox
     uint32_t          total;        // 总数
     uint32_t          size;         // 邮箱大小
     uint32_t          wait_count;   // 等待数量
+    uint32_t          mail_count;   // 邮件数量
     CM_NodeLinkList_t mails;        // 邮件列表
     CM_NodeLinkList_t waits;        // 等待列表 _MailWaitNode
     CM_NodeLink_t     link;         // _CO_Mailbox
@@ -358,7 +359,7 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
                 coroutine->tasks_sleep = &task->link;
             } else {
                 // 遍历寻找插入位置
-                CO_TCB *r = nullptr;
+                CO_TCB *r = e;
                 CM_NodeLink_Foreach_Positive(CO_TCB, link, coroutine->tasks_sleep, p)
                 {
                     if (p->execv_time > task->execv_time) {
@@ -502,7 +503,7 @@ static void _Task(CO_Thread *coroutine)
     CO_UnLock();
     if (n == nullptr) {
         // 运行空闲任务
-        if (Inter.events->Idle != nullptr && coroutine->wait_run_task_count == 0)
+        if (sleep_ms && Inter.events->Idle != nullptr && coroutine->wait_run_task_count == 0)
             Inter.events->Idle(sleep_ms, Inter.events->object);
         return;
     }
@@ -701,7 +702,7 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
     CO_UnLock();
     // 唤醒
     if (Inter.events->wake != nullptr)
-        Inter.events->wake(Inter.events->object);
+        Inter.events->wake(coroutine->co_id, Inter.events->object);
     return n;
 }
 
@@ -887,6 +888,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
     if (mb == nullptr || data == nullptr)
         return false;
     CO_Lock();
+    mb->mail_count++;
     if (mb->size < data->size + sizeof(Coroutine_MailData)) {
         // 检查邮箱，是否有过期邮件
         uint64_t       now = Inter.GetMillisecond();
@@ -896,6 +898,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
             if (md->expiration_time <= now) {
                 // 删除过期
                 mb->size += md->size + sizeof(Coroutine_MailData);
+                mb->mail_count--;
                 p = CM_NodeLink_Remove(&mb->mails, &md->link);
                 DeleteMessage(md);
                 if (p == mb->mails)
@@ -912,6 +915,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
         }
     }
     mb->size -= data->size + sizeof(Coroutine_MailData);
+    uint16_t co_id = 0;
     // 检查等待列表
     if (!CM_NodeLink_IsEmpty(mb->waits)) {
         CM_NodeLink_t *p = CM_NodeLink_First(mb->waits);
@@ -924,7 +928,8 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
                 task->execv_time = 0;
                 task->timeout    = 0;
                 AddTaskList(task, task->priority);
-                data = nullptr;
+                data  = nullptr;
+                co_id = task->coroutine->co_id;
                 break;
             }
             p = p->next;
@@ -936,7 +941,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
         CO_UnLock();
         // 唤醒
         if (Inter.events->wake != nullptr)
-            Inter.events->wake(Inter.events->object);
+            Inter.events->wake(co_id, Inter.events->object);
         return true;
     }
     // 加入消息列表
@@ -960,6 +965,7 @@ static Coroutine_MailData *GetMail(Coroutine_Mailbox mb,
                 Coroutine_MailData *t = md;
                 p                     = CM_NodeLink_Remove(&mb->mails, &t->link);
                 mb->size += t->size + sizeof(Coroutine_MailData);
+                mb->mail_count--;
                 DeleteMessage(t);
                 if (p == CM_NodeLink_First(mb->mails))
                     break;
@@ -975,7 +981,10 @@ static Coroutine_MailData *GetMail(Coroutine_Mailbox mb,
                 break;
         }
     }
-    if (ret) mb->size += ret->size + sizeof(Coroutine_MailData);
+    if (ret) {
+        mb->size += ret->size + sizeof(Coroutine_MailData);
+        mb->mail_count--;
+    }
     return ret;
 }
 
@@ -1012,6 +1021,7 @@ static Coroutine_MailData *ReceiveMail(Coroutine_Mailbox mb,
         ret     = n->data;
         n->data = nullptr;
         mb->size += ret->size + sizeof(Coroutine_MailData);
+        mb->mail_count--;
     }
     CM_NodeLink_Remove(&mb->waits, &n->link);
     task->isWaitMail = 0;   // 清除等待标志
@@ -1194,7 +1204,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     // ----------------------------- 邮箱 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
-    idx += co_snprintf(buf + idx, max_size - idx, "used    ");
+    idx += co_snprintf(buf + idx, max_size - idx, "used         ");
     idx += co_snprintf(buf + idx, max_size - idx, "total   ");
     idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
@@ -1203,7 +1213,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
         idx += co_snprintf(buf + idx, max_size - idx, "%-31s ", mb->name);
-        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->total - mb->size);
+        idx += co_snprintf(buf + idx, max_size - idx, "%8u|%-4u ", mb->total - mb->size, mb->mail_count);
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->total);
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
@@ -1316,12 +1326,13 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
         // 清除等待标志
         task->execv_time = 0;
         task->timeout    = 0;
+        uint16_t co_id   = task->coroutine->co_id;
         // 加入运行列表
         AddTaskList(task, task->priority);
         CO_UnLock();
         // 唤醒
         if (Inter.events->wake != nullptr)
-            Inter.events->wake(Inter.events->object);
+            Inter.events->wake(co_id, Inter.events->object);
         CO_Lock();
     }
     CO_UnLock();
@@ -1471,8 +1482,9 @@ static void UnlockMutex(Coroutine_Mutex mutex)
     CO_Thread *c = GetCurrentThread(-1);
     if (mutex == nullptr || c == nullptr || c->idx_task == nullptr)
         return;
-    CO_TCB *task   = c->idx_task;
-    bool    isWait = false;
+    CO_TCB * task   = c->idx_task;
+    bool     isWait = false;
+    uint16_t co_id  = 0;
     CO_Lock();
     if (mutex->owner == task) {
         // 解锁
@@ -1507,13 +1519,14 @@ static void UnlockMutex(Coroutine_Mutex mutex)
                 if (mutex->max_wait_time < tv)
                     mutex->max_wait_time = tv;
                 isWait = true;
+                co_id  = task->coroutine->co_id;
             }
         }
     }
     CO_UnLock();
     // 唤醒
     if (isWait && Inter.events->wake != nullptr)
-        Inter.events->wake(Inter.events->object);
+        Inter.events->wake(co_id, Inter.events->object);
     return;
 }
 
