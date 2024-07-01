@@ -146,28 +146,30 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
 static sem_t sem_sleep[MAX_THREADS];
 static bool  is_sem_sleep[MAX_THREADS];
 
-
 static Coroutine_Events events = {
     nullptr,
     nullptr,
     nullptr,
     [](uint32_t time, void *object) -> void {
         // Sleep(1); 模拟休眠
-        int idx = Coroutine.GetCurrentCoroutineIdx();
-        EnterCriticalSection(&critical_section);
-        is_sem_sleep[idx] = 1;
-        LeaveCriticalSection(&critical_section);
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_sec += time / 1000;   // 设置超时时间为当前时间 + 10 秒
-        ts.tv_nsec += (time % 1000) * 1000000;
+        int idx = Coroutine.GetCurrentCoroutineIdx();
+        __Lock(critical_section);
+        is_sem_sleep[idx] = 1;
+        __UnLock(critical_section);
+        auto tv_nsec = ts.tv_nsec + time * 1000000;
+        ts.tv_nsec += tv_nsec;
         sem_timedwait(&sem_sleep[idx], &ts);
+        __Lock(critical_section);
+        is_sem_sleep[idx] = 0;
+        __UnLock(critical_section);
         return;
     },
     [](uint16_t co_id, void *object) -> void {
-        EnterCriticalSection(&critical_section);
+        __Lock(critical_section);
         bool isWait = is_sem_sleep[co_id];
-        LeaveCriticalSection(&critical_section);
+        __UnLock(critical_section);
         if (isWait)
             sem_post(&sem_sleep[co_id]);
         return;
