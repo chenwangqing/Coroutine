@@ -365,10 +365,11 @@ static uint32_t GetSleepTask(CO_Thread *coroutine, uint64_t ts)
         return 0;
     CO_TCB *task = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_sleep));
     if (ts >= task->execv_time) {
-        task->isAddSleepList = 0;
         // 移除休眠列表
+        task->isAddSleepList = 0;
         CM_NodeLink_Remove(&coroutine->tasks_sleep, &task->link);
         // 加入运行列表
+        task->isAddRunList = 1;
         CM_NodeLink_Insert(&coroutine->tasks_run, CM_NodeLink_End(coroutine->tasks_run), &task->link);
         return 0;
     }
@@ -1495,7 +1496,7 @@ static void Free(void *      ptr,
                  const char *file,
                  int         line)
 {
-    if(ptr) Inter.Free(ptr, file, line);
+    if (ptr) Inter.Free(ptr, file, line);
     return;
 }
 
