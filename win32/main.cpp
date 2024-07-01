@@ -18,7 +18,7 @@ Coroutine_Mutex     lock;
 static uint64_t Task1_func1(uint32_t timeout)
 {
     uint64_t ts = Coroutine.GetMillisecond();
-    Coroutine.YieldDelay(1000);
+    Coroutine.YieldDelay(timeout);
     ts = Coroutine.GetMillisecond() - ts;
     return ts;
 }
@@ -30,9 +30,10 @@ void Task1(void *obj)
     while (true) {
         PrintMemory();
         std::string str = "hello";
-        uint64_t    ts  = Task1_func1(1000);
+        int ms = (rand() % 750) + 250;
+        uint64_t    ts  = Task1_func1(ms);
         str += std::to_string(i);
-        printf("[%llu][1][%llu]i = %d %s\n", Coroutine.GetMillisecond(), ts, i++, str.c_str());
+        printf("[%llu][1][%llu/%d]i = %d %s\n", Coroutine.GetMillisecond(), ts,ms, i++, str.c_str());
 #if 1
         Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str.c_str(), str.size(), 1000);
         if (!Coroutine.SendMail(mail1, data))
@@ -51,11 +52,12 @@ void Task2(void *obj)
     printf("start: %llx", Coroutine.GetMillisecond());
     while (true) {
         std::string str = "hello";
+        int ms = (rand() % 250) + 250;
         uint64_t    ts  = Coroutine.GetMillisecond();
-        Coroutine.YieldDelay(500);
+        Coroutine.YieldDelay(ms);
         ts = Coroutine.GetMillisecond() - ts;
         str += std::to_string(i);
-        printf("[%llu][2][%llu]i = %d %s\n", Coroutine.GetMillisecond(), ts, i++, str.c_str());
+        printf("[%llu][2][%llu/%d]i = %d %s\n", Coroutine.GetMillisecond(), ts,ms, i++, str.c_str());
         Coroutine.GiveSemaphore(sem1, 1);
         Sleep(2);
     }
@@ -92,7 +94,8 @@ void Task3(void *obj)
 void Task4(void *obj)
 {
     while (true) {
-        Coroutine.YieldDelay(500);
+        int ms = (rand() % 250) + 250;
+        Coroutine.YieldDelay(ms);
         auto data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
         if (data == NULL) continue;
         printf("[%llu][4]mail1 recv: %llu %.*s\n",

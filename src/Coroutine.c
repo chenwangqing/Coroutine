@@ -165,9 +165,13 @@ struct _CO_TCB
     char *         name;                 // 名称
 
 
-    SemaphoreNode wait_sem;     // 信号等待节点
-    MailWaitNode  wait_mail;    // 邮件等待节点
-    CM_NodeLink_t wait_mutex;   // 等待互斥锁节点
+    SemaphoreNode wait_sem;    // 信号等待节点
+    MailWaitNode  wait_mail;   // 邮件等待节点
+    struct                     //
+    {                          //
+        CM_NodeLink_t link;    // _CO_TCB
+        CO_Mutex *    mutex;   // 等待互斥锁
+    } wait_mutex;              // 等待互斥锁节点
 
     CM_NodeLink_t link;   // _CO_TCB
 };
@@ -272,6 +276,11 @@ static void DeleteTask(CO_TCB *t)
     if (t->isWaitSem) {
         CM_NodeLink_Remove(&t->wait_sem.semaphore->list, &t->wait_sem.link);
         t->isWaitSem = 0;
+    }
+    // 释放互斥
+    if (t->isWaitMutex) {
+        CM_NodeLink_Remove(&t->wait_mutex.mutex->list, &t->wait_mutex.link);
+        t->isWaitMutex = 0;
     }
     // 释放名称
     if (t->name) Inter.Free(t->name, __FILE__, __LINE__);
@@ -1417,13 +1426,15 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
         isOk = true;
     } else if (mutex->owner == nullptr) {
         // 获取锁
-        mutex->owner = task;
-        mutex->value = 1;
-        isOk         = true;
+        mutex->owner           = task;
+        mutex->value           = 1;
+        task->wait_mutex.mutex = mutex;
+        isOk                   = true;
     } else {
         // 等待锁
-        CM_NodeLink_Insert(&mutex->list, CM_NodeLink_End(mutex->list), &task->wait_mutex);
-        task->isWaitMutex = true;
+        CM_NodeLink_Insert(&mutex->list, CM_NodeLink_End(mutex->list), &task->wait_mutex.link);
+        task->wait_mutex.mutex = mutex;
+        task->isWaitMutex      = true;
         mutex->wait_count++;
     }
     CO_UnLock();
@@ -1433,7 +1444,8 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
     _Yield(c, timeout);
     // 移除等待列表
     CO_Lock();
-    CM_NodeLink_Remove(&mutex->list, &task->wait_mutex);
+    CM_NodeLink_Remove(&mutex->list, &task->wait_mutex.link);
+    task->wait_mutex.mutex = nullptr;
     if (task->isWaitMutex)
         mutex->wait_count--;
     task->isWaitMutex = false;
@@ -1456,9 +1468,9 @@ static void UnlockMutex(Coroutine_Mutex mutex)
             mutex->owner = nullptr;
             // 唤醒等待队列
             if (!CM_NodeLink_IsEmpty(mutex->list)) {
-                task             = CM_NodeLink_ToType(CO_TCB, wait_mutex, CM_NodeLink_First(mutex->list));
-                task->execv_time = 0;
-                task->timeout    = 0;
+                task              = CM_NodeLink_ToType(CO_TCB, wait_mutex.link, CM_NodeLink_First(mutex->list));
+                task->execv_time  = 0;
+                task->timeout     = 0;
                 task->isWaitMutex = false;
                 mutex->owner      = task;
                 mutex->value      = 1;
