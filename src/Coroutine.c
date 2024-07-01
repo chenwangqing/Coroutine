@@ -6,6 +6,8 @@ typedef uint32_t jmp_buf[6];
 #include <setjmp.h>
 #endif
 
+typedef int STACK_TYPE;   // 栈类型
+
 // --------------------------------------------------------------------------------------
 //                              |   跳转处理    |
 // --------------------------------------------------------------------------------------
@@ -142,8 +144,8 @@ struct _CO_TCB
     jmp_buf        env;                  // 环境
     uint64_t       execv_time;           // 执行时间
     uint32_t       timeout;              // 超时时间
-    size_t *       stack;                // 栈缓存
-    size_t *       p_stack;              // 栈
+    STACK_TYPE *   stack;                // 栈缓存
+    STACK_TYPE *   p_stack;              // 栈
     uint32_t       stack_len;            // 当前栈长度
     uint32_t       stack_max;            // 最大长度
     uint32_t       stack_alloc;          // 分配长度
@@ -160,7 +162,7 @@ struct _CO_TCB
     void *         obj;                  // 执行参数
     uint64_t       run_time;             // 运行时间
     CO_Thread *    coroutine;            // 父节点
-    size_t *       s, *p;                // 临时变量
+    STACK_TYPE *   s, *p;                // 临时变量
     char *         name;                 // 名称
 
     SemaphoreNode wait_sem;    // 信号等待节点
@@ -186,16 +188,16 @@ struct _CO_TCB
  */
 struct _CO_Thread
 {
-    jmp_buf          env;               // 环境
-    uint64_t         start_time;        // 启动时间
-    uint64_t         run_time;          // 运行时间
-    uint64_t         task_start_time;   // 任务开始时间
-    uint32_t         isRun : 1;         // 运行
-    volatile size_t *stack;             // 栈
-    CO_TCB *         idx_task;          // 当前任务
-    size_t           ThreadId;          // 当前协程的线程id
-    uint16_t         co_id;             // 协程id
-    uint32_t         task_count;        // 任务数量
+    jmp_buf              env;               // 环境
+    uint64_t             start_time;        // 启动时间
+    uint64_t             run_time;          // 运行时间
+    uint64_t             task_start_time;   // 任务开始时间
+    uint32_t             isRun : 1;         // 运行
+    volatile STACK_TYPE *stack;             // 栈
+    CO_TCB *             idx_task;          // 当前任务
+    size_t               ThreadId;          // 当前协程的线程id
+    uint16_t             co_id;             // 协程id
+    uint32_t             task_count;        // 任务数量
 
     CM_NodeLinkList_t tasks_run;     // 运行任务列表 CO_TCB
     CM_NodeLinkList_t tasks_sleep;   // 睡眠任务列表 CO_TCB
@@ -433,11 +435,11 @@ static void CheckWatchdog(CO_Thread *coroutine)
 
 static void _enter_into(volatile CO_TCB *n)
 {
-    volatile size_t __stack = 0x44332211;
+    volatile STACK_TYPE __stack = 0x44332211;
     // 获取栈起始指针
     if (n->coroutine->stack == nullptr)
-        n->coroutine->stack = (size_t *)&__stack;   // 不能在后面创建局部变量
-    else if (n->coroutine->stack != (size_t *)&__stack)
+        n->coroutine->stack = (STACK_TYPE *)&__stack;   // 不能在后面创建局部变量
+    else if (n->coroutine->stack != (STACK_TYPE *)&__stack)
         return;   // 栈错误,栈被迁移
     // 保存环境
     int ret = _c_setjmp(n->coroutine->env);
@@ -515,16 +517,16 @@ static void ContextSwitch(volatile CO_TCB *n)
     // 保存环境,回到调度器
     int ret = _c_setjmp(((CO_TCB *)n)->env);
     if (ret == 0) {
-        volatile size_t __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
+        volatile STACK_TYPE __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
         // 保存栈数据
-        n->p_stack = ((size_t *)&__mem);   // 获取栈结尾
+        n->p_stack = ((STACK_TYPE *)&__mem);   // 获取栈结尾
         n->p_stack -= 4;
         n->stack_len = n->coroutine->stack - n->p_stack;
         if (n->stack_len > n->stack_alloc) {
             if (n->stack != nullptr)
                 Inter.Free(n->stack, __FILE__, __LINE__);
             n->stack_alloc = ALIGN(n->stack_len, 128) * 128;   // 按512字节分配，避免内存碎片
-            n->stack       = (size_t *)Inter.Malloc(n->stack_alloc * sizeof(size_t), __FILE__, __LINE__);
+            n->stack       = (STACK_TYPE *)Inter.Malloc(n->stack_alloc * sizeof(STACK_TYPE), __FILE__, __LINE__);
         }
         if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
         if (n->stack == nullptr) {
@@ -573,27 +575,6 @@ static void _Yield(CO_Thread *coroutine, uint32_t timeout)
     }
     // 保存堆栈数据
     ContextSwitch(n);
-    return;
-}
-
-/**
- * @brief    结束任务
- * @param    taskId         任务id
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-16
- */
-static void _task_exit(Coroutine_TaskId taskId, bool isEx)
-{
-    CO_TCB *n = (CO_TCB *)taskId;
-    if (n == nullptr || n->coroutine == nullptr)
-        return;
-    // 设置结束标志
-    n->isDel = true;
-    if (isEx)
-        return;
-    // 跳转
-    CO_Thread *coroutine = n->coroutine;
-    longjmp(coroutine->env, 1);
     return;
 }
 
@@ -683,7 +664,7 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
     n->coroutine   = coroutine;
     n->isRun       = true;
     n->isFirst     = true;
-    n->stack       = (size_t *)Inter.Malloc(128 * sizeof(size_t), __FILE__, __LINE__);   // 预分配 512 字节
+    n->stack       = (STACK_TYPE *)Inter.Malloc(128 * sizeof(STACK_TYPE), __FILE__, __LINE__);   // 预分配 512 字节
     n->stack_alloc = 128;
     CM_NodeLink_Init(&n->link);
     if (name != nullptr && name[0] != '\0') {
@@ -1073,8 +1054,7 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
         idx += co_snprintf(buf + idx,
                            max_size - idx,
                            "   %s   ",
-                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem) ? "W"
-                                                                                               : "S");
+                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem) ? "W" : "S");
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
