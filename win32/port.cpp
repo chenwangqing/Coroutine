@@ -99,6 +99,9 @@ static Coroutine_Events events = {
         is_sem_sleep[idx] = 1;
         LeaveCriticalSection(&critical_section);
         WaitForSingleObject(sem_sleep[idx], time);
+        EnterCriticalSection(&critical_section);
+        is_sem_sleep[idx] = 0;
+        LeaveCriticalSection(&critical_section);
         return;
     },
     [](uint16_t co_id, void *object) -> void {
