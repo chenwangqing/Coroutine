@@ -143,8 +143,9 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
 
 #define MAX_THREADS 3
 
-static sem_t sem_sleep[MAX_THREADS];
-static bool  is_sem_sleep[MAX_THREADS];
+static sem_t    sem_sleep[MAX_THREADS];
+static bool     is_sem_sleep[MAX_THREADS];
+static uint64_t sem_sleep_time[MAX_THREADS];
 
 static Coroutine_Events events = {
     nullptr,
@@ -168,7 +169,8 @@ static Coroutine_Events events = {
     },
     [](uint16_t co_id, void *object) -> void {
         __Lock(critical_section);
-        bool isWait = is_sem_sleep[co_id];
+        bool isWait           = is_sem_sleep[co_id];
+        sem_sleep_time[co_id] = GetMillisecond();
         __UnLock(critical_section);
         if (isWait)
             sem_post(&sem_sleep[co_id]);
