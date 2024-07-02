@@ -11,6 +11,7 @@
 
 static volatile uint64_t Millisecond_count = 0;
 static int               uart_log_fd       = 0;
+extern Coroutine_Mutex   lock_log;
 #define DEBUG_MEMORY 1
 
 void CriticalSection(bool en)
@@ -117,6 +118,16 @@ const Coroutine_Inter *GetInter(void)
     return &Inter;
 }
 
+static char log_buf[512];
+
+void UART_LOG(const void *data, int lens)
+{
+    Coroutine.LockMutex(lock_log, UINT32_MAX);
+    UART_Write(uart_log_fd, data, lens);
+    Coroutine.UnlockMutex(lock_log);
+    return;
+}
+
 static int _print(int level, const char *_file, int line, const char *fmt, ...)
 {
     level = level < 0 ? 0 : (level > NPLOG_LEVEL_MAX ? NPLOG_LEVEL_MAX : level);
@@ -151,14 +162,13 @@ static int _print(int level, const char *_file, int line, const char *fmt, ...)
     time_t    times = now / 1000;
     struct tm nowTime;
     Localtime(times, nowTime);
-    char tmp[512];
-    len += ff_snprintf(tmp + len, sizeof(tmp) - len, "%llu|%02d %02d-%02d:%02d:%02d|", now, nowTime.tm_mon + 1, nowTime.tm_mday, nowTime.tm_hour, nowTime.tm_min, nowTime.tm_sec);
-    len += ff_snprintf(tmp + len, sizeof(tmp) - len, "%d|%-15s|%04d|", level, file, line);
+    len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "%llu|%02d %02d-%02d:%02d:%02d|", now, nowTime.tm_mon + 1, nowTime.tm_mday, nowTime.tm_hour, nowTime.tm_min, nowTime.tm_sec);
+    len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "%d|%-15s|%04d|", level, file, line);
     va_list argptr;
     va_start(argptr, fmt);
-    len += ff_vsnprintf(tmp + len, sizeof(tmp) - len, fmt, argptr);
+    len += ff_vsnprintf(log_buf + len, sizeof(log_buf) - len, fmt, argptr);
     va_end(argptr);
-    UART_Write(uart_log_fd, tmp, len);
+    UART_LOG(log_buf, len);
     return len;
 }
 
@@ -196,19 +206,18 @@ static void _PrintArray(int level, const char *_file, int line, const void *data
     time_t    times = now / 1000;
     struct tm nowTime;
     Localtime(times, nowTime);
-    char tmp[512];
-    len += ff_snprintf(tmp + len, sizeof(tmp) - len, "%llu|%02d %02d-%02d:%02d:%02d|", now, nowTime.tm_mon + 1, nowTime.tm_mday, nowTime.tm_hour, nowTime.tm_min, nowTime.tm_sec);
-    len += ff_snprintf(tmp + len, sizeof(tmp) - len, "%d|%-15s|%04d|", level, file, line);
+    len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "%llu|%02d %02d-%02d:%02d:%02d|", now, nowTime.tm_mon + 1, nowTime.tm_mday, nowTime.tm_hour, nowTime.tm_min, nowTime.tm_sec);
+    len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "%d|%-15s|%04d|", level, file, line);
     const uint8_t *p = (uint8_t *)data;
-    for (int i = 0; i < lens && len < sizeof(tmp) - 4; i++) {
+    for (int i = 0; i < lens && len < sizeof(log_buf) - 4; i++) {
         if ((i % 16) == 0 && lens > 16) {
-            tmp[len++] = '\r';
-            tmp[len++] = '\n';
+            log_buf[len++] = '\r';
+            log_buf[len++] = '\n';
         }
-        len += ff_snprintf(tmp + len, sizeof(tmp) - len, "%02X ", p[i]);
+        len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "%02X ", p[i]);
     }
-    len += ff_snprintf(tmp + len, sizeof(tmp) - len, "\n");
-    UART_Write(uart_log_fd, tmp, len);
+    len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "\n");
+    UART_LOG(log_buf, len);
     return;
 }
 

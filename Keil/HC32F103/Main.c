@@ -10,9 +10,18 @@
 #include "Coroutine.h"
 
 extern void         PrintMemory(void);
+extern void         UART_LOG(const void *data, int lens);
 Coroutine_Semaphore sem1;
 Coroutine_Mailbox   mail1;
 Coroutine_Mutex     lock;
+Coroutine_Mutex     lock_log;
+Coroutine_Semaphore sem_uart;
+
+void UART_Yield(void)
+{
+    // Coroutine.Yield();
+    return;
+}
 
 static uint64_t Task1_func1(uint32_t timeout)
 {
@@ -29,11 +38,11 @@ static void Task1(void *arg)
         int      ms = (rand() % 1010) + 10;
         uint64_t ts = Task1_func1(ms);
         LOG_DEBUG("[1][%llu/%d]i = %d", ts, ms, i++);
-        const int mlen = 1024;
+        const int mlen = 1024 + 512;
         char *    str  = Coroutine.Malloc(mlen, __FILE__, __LINE__);
         if (str) {
             int n = Coroutine.PrintInfo(str, mlen);
-            UART_Write(0, str, n);
+            UART_LOG(str, n);
             Coroutine.Free(str, __FILE__, __LINE__);
         }
         PrintMemory();
@@ -59,7 +68,7 @@ void Task2(void *obj)
         if (!Coroutine.SendMail(mail1, data))
             Coroutine.DeleteMessage(data);
     }
-    return;
+    // return;
 }
 
 static void *Task3_Func(void *obj)
@@ -89,7 +98,7 @@ void Task3(void *obj)
         if (!re)
             re = Coroutine.Async(Task3_Func, a);
     }
-    return;
+    //    return;
 }
 
 void Task4(void *obj)
@@ -106,7 +115,7 @@ void Task4(void *obj)
                   (char *)data->data);
         Coroutine.DeleteMessage(data);
     }
-    return;
+    //    return;
 }
 
 
@@ -127,7 +136,7 @@ void Task5(void *obj)
     while (!Coroutine.LockMutex(lock, 1000000))
         ;
     ts = Coroutine.GetMillisecond() - ts;
-    LOG_DEBUG("[5]----------------------- num = %d %llu -----------------------\n",  *num, ts);
+    LOG_DEBUG("[5]----------------------- num = %d %llu -----------------------\n", *num, ts);
     Coroutine.UnlockMutex(lock);
     return;
 }
@@ -152,7 +161,7 @@ void Task6(void *obj)
     while (!Coroutine.LockMutex(lock, 1000000))
         ;
     ts = Coroutine.GetMillisecond() - ts;
-    LOG_DEBUG("[6]----------------------- num = %d %llu -----------------------\n",  *num, ts);
+    LOG_DEBUG("[6]----------------------- num = %d %llu -----------------------\n", *num, ts);
     Coroutine.UnlockMutex(lock);
     return;
 }
@@ -183,10 +192,12 @@ int main(void)
     const Coroutine_Inter *       inter = GetInter();
     Coroutine.SetInter(inter);
     // 初始化信号
-    sem1    = Coroutine.CreateSemaphore("sem1", 0);
-    mail1   = Coroutine.CreateMailbox("mail1", 1024);
-    lock    = Coroutine.CreateMutex("lock");
-    int num = 0;
+    sem1     = Coroutine.CreateSemaphore("sem1", 0);
+    mail1    = Coroutine.CreateMailbox("mail1", 1024);
+    lock     = Coroutine.CreateMutex("lock");
+    lock_log = Coroutine.CreateMutex("lock_log");
+    sem_uart = Coroutine.CreateSemaphore("sem_uart", 0);
+    int num  = 0;
 
     // 添加任务
     Coroutine.AddTask(-1, Task1, nullptr, TASK_PRI_NORMAL, "Task1");

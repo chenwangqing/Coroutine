@@ -1,6 +1,9 @@
 
 #include "uart.h"
 #include "app_cfg.h"
+#include "Coroutine.h"
+
+extern Coroutine_Semaphore sem_uart;
 
 /**
  * @brief    FIFO
@@ -19,6 +22,12 @@ typedef struct
 
 typedef struct
 {
+    uint8_t *buff;
+    size_t   size;
+} TxNode;
+
+typedef struct
+{
     uint32_t interface;
     uint32_t ReMap;
     uint32_t PortTx;
@@ -33,6 +42,7 @@ typedef struct
     uint8_t *RxBuffer;
     uint16_t RxBufferSize;
     CM_FIFO *fifo;
+    TxNode * tx;
 } UART_ConfigTypeDef;
 
 #if UART_SEND_DMA_EN
@@ -59,6 +69,8 @@ static uint8_t UART_UI_RxBuffer[1];
 #endif
 static uint8_t UART_UI_RxFIFOBuffer[0 + 128];
 static CM_FIFO UART_UI_RxFIFO = {UART_UI_RxFIFOBuffer, sizeof(UART_UI_RxFIFOBuffer), 0, 0, 0};
+
+static TxNode UART_TXNode[2];
 
 extern uint64_t GetMilliseconds(void);
 
@@ -142,10 +154,19 @@ static void USART_IRQHandler(const UART_ConfigTypeDef *cfg)
         CheckDMA(cfg);
     }
 #endif
+    uint8_t ch = USART_ReceiveData(cfg->interface);
     if (USART_GetITStatus(cfg->interface, USART_IT_RXNE)) {
-        uint8_t ch = USART_ReceiveData(cfg->interface);
         CM_FIFO_Write(cfg->fifo, &ch, 1);
-        // cfg->fifo->time = GetMilliseconds();
+    } else if (USART_GetITStatus(cfg->interface, USART_IT_TC)) {
+        USART_ClearITPendingBit(cfg->interface, USART_IT_TC);
+        if (cfg->tx->size && --cfg->tx->size) {
+            ch = *(++cfg->tx->buff);
+            USART_SendData(cfg->interface, ch);
+        } else if (cfg->tx->buff) {
+            // 发送完成
+            cfg->tx->buff = NULL;
+            Coroutine.GiveSemaphore(sem_uart, 1);
+        }
     }
     return;
 }
@@ -247,6 +268,7 @@ static void BSP_UART_Init(const UART_ConfigTypeDef *cfg)
     DMA_Cmd(DMA1, cfg->dma_rx, ENABLE);
 #else
     USART_ITConfig(cfg->interface, USART_IT_RXNE, ENABLE);
+    USART_ITConfig(cfg->interface, USART_IT_TC, ENABLE);
 #endif
     // 使能串口
     USART_Cmd(cfg->interface, ENABLE);
@@ -316,16 +338,23 @@ int UART_Write(size_t fd, const void *data, int len)
     DMA_Cmd(DMA1, cfg->dma_tx, ENABLE);
     __enable_irq();
 #else
-    const uint8_t *p  = (const uint8_t *)data;
-    uint64_t       ts = GetMilliseconds();
-    for (int i = 0; i < len; i++) {
-        USART_SendData(cfg->interface, p[i]);
-        while (!USART_GetFlagStatus(cfg->interface, USART_FLAG_TC)) {
-            if ((GetMilliseconds() - ts) >= 500)
-                return len;
-        }
-        ts = GetMilliseconds();
-    }
+    uint8_t *p    = (uint8_t *)data;
+    cfg->tx->buff = p;
+    cfg->tx->size = len;
+    USART_SendData(cfg->interface, p[0]);
+    Coroutine.WaitSemaphore(sem_uart, 1, 1000);   // 等待发送完成
+    cfg->tx->size = 0;
+    cfg->tx->buff = NULL;
+    // uint64_t ts      = GetMilliseconds();
+    // for (int i = 0; i < len; i++) {
+    //     USART_SendData(cfg->interface, p[i]);
+    //     while (!USART_GetFlagStatus(cfg->interface, USART_FLAG_TC)) {
+    //         if ((GetMilliseconds() - ts) >= 500)
+    //             return len;
+    //         UART_Yield();
+    //     }
+    //     ts = GetMilliseconds();
+    // }
 #endif
     return len;
 }

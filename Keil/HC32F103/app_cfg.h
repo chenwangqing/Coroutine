@@ -66,7 +66,8 @@ static inline uint32_t FUNC_MCU_UUID_GET(int idx)
                        sizeof(UART_UI_TxBuffer), \
                        UART_UI_RxBuffer,         \
                        sizeof(UART_UI_RxBuffer), \
-                       &UART_UI_RxFIFO
+                       &UART_UI_RxFIFO,          \
+                       &UART_TXNode[0]
 
 // 串口2
 #define UART_DEBUG_TX_PORT GPIOA
@@ -86,7 +87,8 @@ static inline uint32_t FUNC_MCU_UUID_GET(int idx)
                           sizeof(UART_Debug_TxBuffer),      \
                           UART_Debug_RxBuffer,              \
                           sizeof(UART_Debug_RxBuffer),      \
-                          &UART_Debug_RxFIFO
+                          &UART_Debug_RxFIFO,               \
+                          &UART_TXNode[1]
 
 // 切刀状态 INR6
 #define GPIO_CUTTER_STATUS_PORT GPIOA
