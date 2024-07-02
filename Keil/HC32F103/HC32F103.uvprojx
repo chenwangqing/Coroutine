@@ -48,7 +48,7 @@
             <InvalidFlash>1</InvalidFlash>
           </TargetStatus>
           <OutputDirectory>.\Objects\</OutputDirectory>
-          <OutputName>GT300_MCU_BOOTLOAD_V1.0.0.axf</OutputName>
+          <OutputName>HC32F103.axf</OutputName>
           <CreateExecutable>1</CreateExecutable>
           <CreateLib>0</CreateLib>
           <CreateHexFile>1</CreateHexFile>
@@ -79,7 +79,7 @@
             <nStopB2X>0</nStopB2X>
           </BeforeMake>
           <AfterMake>
-            <RunUserProg1>1</RunUserProg1>
+            <RunUserProg1>0</RunUserProg1>
             <RunUserProg2>0</RunUserProg2>
             <UserProg1Name></UserProg1Name>
             <UserProg2Name></UserProg2Name>
@@ -311,7 +311,7 @@
           </ArmAdsMisc>
           <Cads>
             <interw>1</interw>
-            <Optim>2</Optim>
+            <Optim>1</Optim>
             <oTime>0</oTime>
             <SplitLS>0</SplitLS>
             <OneElfS>1</OneElfS>
@@ -337,7 +337,7 @@
               <MiscControls></MiscControls>
               <Define>USE_STDPERIPH_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>.\LIB\HC32F10x_StdPeriph_Driver\inc;.\LIB\CMSIS\CM3\CoreSupport;.\LIB\CMSIS\CM3\DeviceSupport\HC\HC32F10x;..\HC32F103</IncludePath>
+              <IncludePath>.\LIB\HC32F10x_StdPeriph_Driver\inc;.\LIB\CMSIS\CM3\CoreSupport;.\LIB\CMSIS\CM3\DeviceSupport\HC\HC32F10x;..\HC32F103;..\..\src</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -395,6 +395,16 @@
               <FileName>uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\port.c</FilePath>
+            </File>
+            <File>
+              <FileName>snprintf.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\snprintf.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -520,6 +530,41 @@
               <FileName>system_hc32f10x.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\LIB\CMSIS\CM3\DeviceSupport\HC\HC32F10x\system_hc32f10x.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Src</GroupName>
+          <Files>
+            <File>
+              <FileName>Coroutine.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\src\Coroutine.c</FilePath>
+            </File>
+            <File>
+              <FileName>Coroutine.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\src\Coroutine.h</FilePath>
+            </File>
+            <File>
+              <FileName>Define.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\src\Define.h</FilePath>
+            </File>
+            <File>
+              <FileName>NodeLink.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\src\NodeLink.c</FilePath>
+            </File>
+            <File>
+              <FileName>NodeLink.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\src\NodeLink.h</FilePath>
+            </File>
+            <File>
+              <FileName>Universal.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\src\Universal.h</FilePath>
             </File>
           </Files>
         </Group>

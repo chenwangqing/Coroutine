@@ -382,15 +382,15 @@ typedef uint8_t Bool;
 #define OS_LINUX    1
 #define OS_FREERTOS 2
 
-#ifndef CFG_OS_MODE
-#if (defined(_WIN32) || defined(_WIN64))
-#define CFG_OS_MODE OS_WINDOWS
-#elif __linux__
-#define CFG_OS_MODE OS_LINUX
-#else
-#error "Please set the device type"
-#endif
-#endif
+//#ifndef CFG_OS_MODE
+//#if (defined(_WIN32) || defined(_WIN64))
+//#define CFG_OS_MODE OS_WINDOWS
+//#elif __linux__
+//#define CFG_OS_MODE OS_LINUX
+//#else
+//#error "Please set the device type"
+//#endif
+//#endif
 
 #define OS_IS_LINUX    (CFG_OS_MODE == OS_LINUX)
 #define OS_IS_WINDOWS  (CFG_OS_MODE == OS_WINDOWS)

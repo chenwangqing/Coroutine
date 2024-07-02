@@ -6,18 +6,18 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "hc32f10x.h"
+#include "nplog.h"
+#include "Coroutine.h"
 
-static volatile uint64_t Millisecond_count = 0;
+extern void PrintMemory(void);
 
-void SysTick_Handler(void)
+static void Task1(void *arg)
 {
-    Millisecond_count++;
-    return;
-}
-
-uint64_t GetMilliseconds(void)
-{
-	return 0;
+    while (true) {
+        Coroutine.YieldDelay(1000);
+        LOG_DEBUG("[%llu][1]hello", Coroutine.GetMillisecond());
+        PrintMemory();
+    }
 }
 
 int main(void)
@@ -40,6 +40,16 @@ int main(void)
     NVIC_EnableIRQ(SysTick_IRQn);
     // 初始化串口
     UART_Init();
-    
-    return 0;
+
+    extern const Coroutine_Inter *GetInter(void);
+    const Coroutine_Inter *       inter = GetInter();
+    Coroutine.SetInter(inter);
+    // 初始化信号
+
+    // 添加任务
+    Coroutine.AddTask(-1, Task1, nullptr, TASK_PRI_NORMAL, "Task1");
+
+    while (true)
+        Coroutine.RunTick();
+    // return 0;
 }

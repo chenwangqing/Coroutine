@@ -772,9 +772,9 @@ static uint16_t GetCurrentCoroutineIdx(void)
 static size_t GetThreadId(uint16_t co_id)
 {
     if (co_id >= Inter.thread_count)
-        return -1;
+        return (size_t)-1;
     CO_Thread *coroutine = GetCurrentThread(co_id);
-    return coroutine == nullptr ? -1 : coroutine->ThreadId;
+    return coroutine == nullptr ? (size_t)-1 : coroutine->ThreadId;
 }
 
 /**

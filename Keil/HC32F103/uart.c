@@ -45,7 +45,7 @@ static uint8_t UART_Debug_RxBuffer[512 + 64];
 #else
 static uint8_t UART_Debug_RxBuffer[1];
 #endif
-static uint8_t UART_Debug_RxFIFOBuffer[1024 + 128];
+static uint8_t UART_Debug_RxFIFOBuffer[0 + 128];
 static CM_FIFO UART_Debug_RxFIFO = {UART_Debug_RxFIFOBuffer, sizeof(UART_Debug_RxFIFOBuffer), 0, 0, 0};
 #if UART_SEND_DMA_EN
 static uint8_t UART_UI_TxBuffer[512 + 64];
@@ -57,7 +57,7 @@ static uint8_t UART_UI_RxBuffer[512 + 64];
 #else
 static uint8_t UART_UI_RxBuffer[1];
 #endif
-static uint8_t UART_UI_RxFIFOBuffer[1024 + 128];
+static uint8_t UART_UI_RxFIFOBuffer[0 + 128];
 static CM_FIFO UART_UI_RxFIFO = {UART_UI_RxFIFOBuffer, sizeof(UART_UI_RxFIFOBuffer), 0, 0, 0};
 
 extern uint64_t GetMilliseconds(void);

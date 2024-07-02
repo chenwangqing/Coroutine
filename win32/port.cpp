@@ -45,9 +45,6 @@ static void _Free(void *ptr, const char *file, int line)
     p--;
     EnterCriticalSection(&critical_section);
     memory.used -= (*p) + sizeof(size_t);
-    if (memory.used < 0) {
-        while (true);
-    }
     LeaveCriticalSection(&critical_section);
     free(p);
     return;
