@@ -227,10 +227,11 @@ typedef struct
    * @brief    【内部使用】转交控制权
    * @param    coroutine      线程实例
    * @param    timeout        超时 0：不超时
+   * @return   uint32_t       多耗时的部分
    * @author   CXS (chenxiangshu@outlook.com)
    * @date     2022-08-15
    */
-    void (*YieldDelay)(uint32_t timeout);
+    uint32_t (*YieldDelay)(uint32_t timeout);
 
     /**
      * @brief    【外部使用】运行协程(一次运行一个任务)

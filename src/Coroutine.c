@@ -795,10 +795,16 @@ static void Coroutine_Yield(void)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2022-08-15
  */
-static void Coroutine_YieldTimeOut(uint32_t timeout)
+static uint32_t Coroutine_YieldTimeOut(uint32_t timeout)
 {
+    if (timeout == 0) {
+        Coroutine_Yield();
+        return 0;
+    }
+    uint64_t ts = Inter.GetMillisecond();
     _Yield((CO_Thread *)GetCurrentThread(-1), timeout);
-    return;
+    ts = Inter.GetMillisecond() - ts;                   // 计算耗时
+    return ts > timeout ? (uint32_t)ts - timeout : 0;   // 返回误差
 }
 
 /**
