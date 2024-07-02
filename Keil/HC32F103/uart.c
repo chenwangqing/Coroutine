@@ -351,7 +351,6 @@ int UART_Write(size_t fd, const void *data, int len)
     //     while (!USART_GetFlagStatus(cfg->interface, USART_FLAG_TC)) {
     //         if ((GetMilliseconds() - ts) >= 500)
     //             return len;
-    //         UART_Yield();
     //     }
     //     ts = GetMilliseconds();
     // }

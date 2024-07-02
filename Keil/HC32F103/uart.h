@@ -15,7 +15,6 @@ extern void UART_Init(void);
 extern int  UART_Write(size_t fd, const void *data, int len);
 extern int  UART_Read(size_t fd, void *data, int len, uint32_t timeout);
 extern void UART_DeInit(void);
-extern void UART_Yield(void);// 让出CPU
 
 #ifdef __cplusplus
 }

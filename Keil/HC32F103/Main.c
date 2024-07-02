@@ -17,12 +17,6 @@ Coroutine_Mutex     lock;
 Coroutine_Mutex     lock_log;
 Coroutine_Semaphore sem_uart;
 
-void UART_Yield(void)
-{
-    // Coroutine.Yield();
-    return;
-}
-
 static uint64_t Task1_func1(uint32_t timeout)
 {
     uint64_t ts = Coroutine.GetMillisecond();
