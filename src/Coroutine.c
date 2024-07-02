@@ -1622,6 +1622,8 @@ static Coroutine_ASync ASync(Coroutine_AsyncTask func, void *arg)
 {
     if (func == nullptr)
         return nullptr;
+    char name[32];
+    snprintf(name, sizeof(name), "[%p]", func);
     CO_ASync *a = (CO_ASync *)Inter.Malloc(sizeof(CO_ASync), __FILE__, __LINE__);
     if (a == nullptr) {
         if (Inter.events->Allocation)
@@ -1629,11 +1631,11 @@ static Coroutine_ASync ASync(Coroutine_AsyncTask func, void *arg)
         return nullptr;
     }
     memset(a, 0, sizeof(CO_ASync));
-    a->sem    = Coroutine.CreateSemaphore(nullptr, 0);
+    a->sem    = Coroutine.CreateSemaphore(name, 0);
     a->func   = func;
     a->object = arg;
     // 添加任务
-    if (Coroutine.AddTask(-1, _ASyncTask, a, TASK_PRI_NORMAL, nullptr) == nullptr) {
+    if (Coroutine.AddTask(-1, _ASyncTask, a, TASK_PRI_NORMAL, name) == nullptr) {
         Coroutine.DeleteSemaphore(a->sem);
         Inter.Free(a, __FILE__, __LINE__);
         return nullptr;
