@@ -32,6 +32,7 @@ static void Task1(void *arg)
         int      ms = (rand() % 1010) + 10;
         uint64_t ts = Task1_func1(ms);
         LOG_DEBUG("[1][%llu/%d]i = %d", ts, ms, i++);
+        PrintMemory();
         const int mlen = 1024 + 512;
         char *    str  = Coroutine.Malloc(mlen, __FILE__, __LINE__);
         if (str) {
@@ -39,7 +40,6 @@ static void Task1(void *arg)
             UART_LOG(str, n);
             Coroutine.Free(str, __FILE__, __LINE__);
         }
-        PrintMemory();
     }
     // return;
 }

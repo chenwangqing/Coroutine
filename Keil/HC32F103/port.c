@@ -216,7 +216,7 @@ static void _PrintArray(int level, const char *_file, int line, const void *data
         }
         len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "%02X ", p[i]);
     }
-    len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "\n");
+    len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "\r\n");
     UART_LOG(log_buf, len);
     return;
 }
@@ -225,6 +225,6 @@ NPLOG nplog = {_print, _PrintArray};
 
 void PrintMemory(void)
 {
-    LOG_PRINTF("Memory used: %lld bytes, max used: %lld bytes\n", memory.used, memory.max_used);
+    LOG_PRINTF("Memory used: %lld bytes, max used: %lld bytes", memory.used, memory.max_used);
     return;
 }

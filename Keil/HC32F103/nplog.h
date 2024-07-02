@@ -32,10 +32,10 @@ extern "C" {
 extern NPLOG nplog;
 
 #define LOG_PRINTF_Array(level, data, len) nplog.PrintArray(level, __FILE__, __LINE__, data, len)
-#define LOG_DEBUG(format, ...)             nplog.Print(NPLOG_LEVEL_DEBUG, __FILE__, __LINE__, format "\n", ##__VA_ARGS__)
-#define LOG_PRINTF(format, ...)            nplog.Print(NPLOG_LEVEL_INFO, __FILE__, __LINE__, format "\n", ##__VA_ARGS__)
-#define LOG_WARNING(format, ...)           nplog.Print(NPLOG_LEVEL_WARNING, __FILE__, __LINE__, format "\n", ##__VA_ARGS__)
-#define LOG_ERROR(format, ...)             nplog.Print(NPLOG_LEVEL_ERROR, __FILE__, __LINE__, format "\n", ##__VA_ARGS__)
+#define LOG_DEBUG(format, ...)             nplog.Print(NPLOG_LEVEL_DEBUG, __FILE__, __LINE__, format "\r\n", ##__VA_ARGS__)
+#define LOG_PRINTF(format, ...)            nplog.Print(NPLOG_LEVEL_INFO, __FILE__, __LINE__, format "\r\n", ##__VA_ARGS__)
+#define LOG_WARNING(format, ...)           nplog.Print(NPLOG_LEVEL_WARNING, __FILE__, __LINE__, format "\r\n", ##__VA_ARGS__)
+#define LOG_ERROR(format, ...)             nplog.Print(NPLOG_LEVEL_ERROR, __FILE__, __LINE__, format "\r\n", ##__VA_ARGS__)
 
 #ifdef __cplusplus
 }
