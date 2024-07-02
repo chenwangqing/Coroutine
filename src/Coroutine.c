@@ -611,33 +611,39 @@ static CO_Thread *GetCurrentThread(int co_idx)
 {
     size_t     idx = 0;
     CO_Thread *ret = nullptr;
-    if (co_idx < 0) {
-        size_t id  = Inter.GetThreadId();
-        size_t _id = id % 65537;
-        CO_Lock();
-        for (size_t i = 0; i < Inter.thread_count; i++) {
-            idx = (_id + i) % Inter.thread_count;
-            if (C_Static.coroutines[idx]->ThreadId == id) {
-                ret = C_Static.coroutines[idx];
-                break;
-            } else if (C_Static.coroutines[idx]->ThreadId == (size_t)-1) {
-                // 分配控制器
-                ret           = C_Static.coroutines[idx];
-                ret->ThreadId = id;
-                break;
-            }
-        }
-        CO_UnLock();
+    if (Inter.thread_count == 1) {
+        ret = C_Static.coroutines[0];
+        if (ret->ThreadId == (size_t)-1)
+            ret->ThreadId = Inter.GetThreadId();
     } else {
-        CO_Lock();
-        CM_NodeLink_Foreach_Positive(CO_Thread, link, C_Static.threads, p)
-        {
-            if (p->co_id == co_idx) {
-                ret = p;
-                break;
+        if (co_idx < 0) {
+            size_t id  = Inter.GetThreadId();
+            size_t _id = id % 65537;
+            CO_Lock();
+            for (size_t i = 0; i < Inter.thread_count; i++) {
+                idx = (_id + i) % Inter.thread_count;
+                if (C_Static.coroutines[idx]->ThreadId == id) {
+                    ret = C_Static.coroutines[idx];
+                    break;
+                } else if (C_Static.coroutines[idx]->ThreadId == (size_t)-1) {
+                    // 分配控制器
+                    ret           = C_Static.coroutines[idx];
+                    ret->ThreadId = id;
+                    break;
+                }
             }
+            CO_UnLock();
+        } else {
+            CO_Lock();
+            CM_NodeLink_Foreach_Positive(CO_Thread, link, C_Static.threads, p)
+            {
+                if (p->co_id == co_idx) {
+                    ret = p;
+                    break;
+                }
+            }
+            CO_UnLock();
         }
-        CO_UnLock();
     }
     return ret;
 }
@@ -1188,8 +1194,8 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
                            (uint64_t)coroutine->ThreadId,
                            coroutine->co_id,
                            coroutine->run_time,
-                           a / 100,
-                           a % 100,
+                           a / 10,
+                           a % 10,
                            count);
     }
     // ----------------------------- 信号 -----------------------------
@@ -1774,13 +1780,18 @@ static void *Universal_AsyncGetResultAndDelete(void *async)
     return ASyncGetResultAndDelete((Coroutine_ASync)async);
 }
 
+static void Universal_DelayMs(uint32_t time)
+{
+    Coroutine_YieldTimeOut(time);
+}
+
 static const Universal *GetUniversal(void)
 {
     static const Universal universal = {
         GetMillisecond,
         Malloc,
         Free,
-        Coroutine_YieldTimeOut,
+        Universal_DelayMs,
         Universal_CreateLock,
         Universal_DeleteLock,
         Universal_Lock,
