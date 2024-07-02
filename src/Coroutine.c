@@ -1190,7 +1190,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         int a = coroutine->run_time * 1000 / tv;
         idx += co_snprintf(buf + idx,
                            max_size - idx,
-                           "ThreadId: %llX(%u) RunTime: %llu(%d.%02d%%) ms Task count: %u\r\n",
+                           "ThreadId: %llX(%u) RunTime: %llu(%d.%d%%) ms Task count: %u\r\n",
                            (uint64_t)coroutine->ThreadId,
                            coroutine->co_id,
                            coroutine->run_time,
