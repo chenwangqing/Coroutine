@@ -1634,12 +1634,14 @@ static Coroutine_ASync ASync(Coroutine_AsyncTask func, void *arg)
     a->sem    = Coroutine.CreateSemaphore(name, 0);
     a->func   = func;
     a->object = arg;
+    Coroutine_TaskId taskId;
     // 添加任务
-    if (Coroutine.AddTask(-1, _ASyncTask, a, TASK_PRI_NORMAL, name) == nullptr) {
+    if ((taskId = Coroutine.AddTask(-1, _ASyncTask, a, TASK_PRI_NORMAL, name)) == nullptr) {
         Coroutine.DeleteSemaphore(a->sem);
         Inter.Free(a, __FILE__, __LINE__);
         return nullptr;
     }
+    snprintf(a->sem->name, sizeof(a->sem->name), "[%p:%X]", func, taskId);
     return a;
 }
 
