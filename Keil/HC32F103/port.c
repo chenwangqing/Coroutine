@@ -76,6 +76,7 @@ static void _Free(void *ptr, const char *file, int line)
     CriticalSection(true);
     memory.used -= (*p) + sizeof(size_t);
     CriticalSection(false);
+    free(p);
 #else
     free(ptr);
 #endif
