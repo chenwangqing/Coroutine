@@ -503,8 +503,8 @@ static void _Task(CO_Thread *coroutine)
     CO_UnLock();
     if (n == nullptr) {
         // 运行空闲任务
-        if (sleep_ms && Inter.events->Idle != nullptr && coroutine->wait_run_task_count == 0)
-            Inter.events->Idle(sleep_ms, Inter.events->object);
+        if (sleep_ms > 1 && Inter.events->Idle != nullptr && coroutine->wait_run_task_count == 0)
+            Inter.events->Idle(sleep_ms - 1, Inter.events->object);
         return;
     }
     _enter_into(n);
