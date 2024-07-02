@@ -143,37 +143,66 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
 
 #define MAX_THREADS 3
 
-static sem_t    sem_sleep[MAX_THREADS];
-static bool     is_sem_sleep[MAX_THREADS];
-static uint64_t sem_sleep_time[MAX_THREADS];
+class IdleNode {
+public:
+    pthread_cond_t  g_cond;
+    pthread_mutex_t g_mutex;
+    volatile bool   isWait = false;
+
+    IdleNode()
+    {
+        pthread_cond_init(&g_cond, NULL);
+        pthread_mutex_init(&g_mutex, NULL);
+        return;
+    }
+
+    void Idle(uint32_t time)
+    {
+        isWait = true;
+        struct timeval  now;
+        struct timespec outtime;
+        gettimeofday(&now, NULL);
+        now.tv_sec += time / 1000;
+        now.tv_usec += (time % 1000) * 1000;
+        if (now.tv_usec >= 1000000) {
+            now.tv_sec++;
+            now.tv_usec -= 1000000;
+        }
+        outtime.tv_sec  = now.tv_sec;
+        outtime.tv_nsec = now.tv_usec * 1000;
+        pthread_mutex_lock(&g_mutex);
+        pthread_cond_timedwait(&g_cond, &g_mutex, &outtime);
+        pthread_mutex_unlock(&g_mutex);
+        isWait = false;
+        return;
+    }
+
+    void WeakUp()
+    {
+        pthread_mutex_lock(&g_mutex);
+        if (isWait)
+            pthread_cond_signal(&g_cond);
+        pthread_mutex_unlock(&g_mutex);
+        return;
+    }
+};
+
+static IdleNode *idle_node[MAX_THREADS];
 
 static Coroutine_Events events = {
     nullptr,
-    nullptr,
+    [](void *object) -> void {
+        sched_yield();
+        return;
+    },
     nullptr,
     [](uint32_t time, void *object) -> void {
-        // Sleep(1); 模拟休眠
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
         int idx = Coroutine.GetCurrentCoroutineIdx();
-        __Lock(critical_section);
-        is_sem_sleep[idx] = 1;
-        __UnLock(critical_section);
-        auto tv_nsec = ts.tv_nsec + time * 1000000;
-        ts.tv_nsec += tv_nsec;
-        sem_timedwait(&sem_sleep[idx], &ts);
-        __Lock(critical_section);
-        is_sem_sleep[idx] = 0;
-        __UnLock(critical_section);
+        idle_node[idx]->Idle(time);
         return;
     },
     [](uint16_t co_id, void *object) -> void {
-        __Lock(critical_section);
-        bool isWait           = is_sem_sleep[co_id];
-        sem_sleep_time[co_id] = GetMillisecond();
-        __UnLock(critical_section);
-        if (isWait)
-            sem_post(&sem_sleep[co_id]);
+        idle_node[co_id]->WeakUp();
         return;
     },
     Coroutine_WatchdogTimeout,
@@ -195,8 +224,7 @@ const Coroutine_Inter *GetInter(void)
     critical_section        = __CreateLock();
     memory_critical_section = __CreateLock();
     for (int i = 0; i < MAX_THREADS; i++) {
-        is_sem_sleep[i] = false;
-        sem_init(&sem_sleep[i], 0, 0);
+        idle_node[i] = new IdleNode();
     }
     return &Inter;
 }
