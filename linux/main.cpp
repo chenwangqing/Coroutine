@@ -36,7 +36,7 @@ void Task1(void *obj)
         if (!Coroutine.SendMail(mail1, data))
             Coroutine.DeleteMessage(data);
 #endif
-        //  Sleep(10);
+        Sleep(10);
         Coroutine.PrintInfo(str_buf, 4 * 1024);
         printf("%s", str_buf);
     }
@@ -57,7 +57,7 @@ void Task2(void *obj)
         str += std::to_string(i);
         printf("[%llu][2][%llu/%d]i = %d %s\n", Coroutine.GetMillisecond(), ts, ms, i++, str.c_str());
         Coroutine.GiveSemaphore(sem1, 1);
-        // Sleep(2);
+        Sleep(2);
     }
     return;
 }
@@ -67,7 +67,7 @@ void Task3(void *obj)
     auto func = [](void *obj) -> void * {
         int     *a   = (int *)obj;
         uint64_t now = Coroutine.GetMillisecond();
-        // Sleep(2);
+        Sleep(2);
         a[1] = (rand() % 150) + 0;
         Coroutine.YieldDelay(a[1]);
         a[0] = Coroutine.GetMillisecond() - now;
@@ -80,7 +80,7 @@ void Task3(void *obj)
         if (!Coroutine.WaitSemaphore(sem1, 1, 100))
             continue;
         printf("[%llu][3]sem1 signal\n", Coroutine.GetMillisecond());
-        // Sleep(1);
+        Sleep(1);
         if (re && Coroutine.AsyncWait(re, 100)) {
             int *b = (int *)Coroutine.AsyncGetResultAndDelete(re);
             printf("[%llu][3]async result: %d/%d\n", Coroutine.GetMillisecond(), b[0], b[1]);
@@ -106,7 +106,7 @@ void Task4(void *obj)
                data->size,
                (char *)data->data);
         Coroutine.DeleteMessage(data);
-        // Sleep(2);
+        Sleep(2);
     }
     return;
 }
