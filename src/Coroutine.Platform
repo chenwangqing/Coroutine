@@ -1,0 +1,50 @@
+/**
+ * @file     Coroutine.Platform
+ * @brief    平台相关的汇编实现
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @version  1.0
+ * @date     2024-07-03
+ * 
+ * @copyright Copyright (c) 2024  Four-Faith
+ * 
+ * @par 修改日志:
+ * <table>
+ * <tr><th>日期       <th>版本    <th>作者    <th>说明
+ * <tr><td>2024-07-03 <td>1.0     <td>CXS     <td>创建
+ * </table>
+ */
+#include <stdint.h>
+#include "Coroutine.h"
+
+#if !COROUTINE_ONLY_SHARED_STACK
+// clang-format off
+/**
+ * @brief    进入协程任务【独立栈】
+ * @param    func           函数入口
+ * @param    arg            函数参数
+ * @param    stack          函数栈
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-03
+ */
+void coroutine_enter_task(void *func, void *arg, int *stack)
+{
+#ifdef WIN32 // Windows x86
+    __asm {
+        // 1. 获取参数到寄存器
+        mov eax, dword ptr[func]
+        mov ebx, dword ptr[arg]
+        mov ecx, dword ptr[stack]
+        // 3. 切换栈
+        mov esp, ecx
+        // 4. 设置函数参数
+        push ebx
+        // 5. 调用函数
+        call eax
+    }
+#else
+    // TODO: 其他平台的实现
+    #error "Coroutine.Platform: Unsupported platform!"
+#endif
+}
+// clang-format on
+#endif   // !COROUTINE_SHARED_STACK

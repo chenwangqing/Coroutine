@@ -5,8 +5,11 @@ typedef uint32_t jmp_buf[6];
 #else
 #include <setjmp.h>
 #endif
+#include "Coroutine.Platform"
 
 typedef int STACK_TYPE;   // 栈类型
+
+#define STACK_SENTRY 0x5A5A5A5A   // 栈哨兵
 
 // --------------------------------------------------------------------------------------
 //                              |   跳转处理    |
@@ -150,6 +153,7 @@ struct _CO_TCB
     uint32_t       stack_len;            // 当前栈长度
     uint32_t       stack_max;            // 最大长度
     uint32_t       stack_alloc;          // 分配长度
+    uint32_t       isSharedStack : 1;    // 是否共享栈
     uint32_t       isDel : 1;            // 是否删除
     uint32_t       isRun : 1;            // 正在运行
     uint32_t       isWaitMail : 1;       // 正在等待邮件
@@ -454,6 +458,17 @@ static void CheckWatchdog(CO_Thread *coroutine)
     return;
 }
 
+static void __task(CO_TCB *n)
+{
+    // 执行任务
+    n->func(n->obj);
+    // 任务结束
+    n->priority = 0;
+    n->isDel    = true;
+    // 回到调度器
+    longjmp(n->coroutine->env, 1);
+}
+
 static void _enter_into(volatile CO_TCB *n)
 {
     volatile STACK_TYPE __stack = 0x44332211;
@@ -469,9 +484,16 @@ static void _enter_into(volatile CO_TCB *n)
             // 设置已运行标志
             n->isFirst = false;
             // 第一次运行
-            n->func(n->obj);
-            // 设置删除标志
-            n->isDel = true;
+            if (n->isSharedStack) {
+                // 直接进入函数
+                __task(n);
+            } else {
+#if !COROUTINE_ONLY_SHARED_STACK
+                // 使用新的栈进入函数
+                coroutine_enter_task(__task, n, n->stack + n->stack_alloc - 1);
+#endif
+            }
+            // 不会执行到这里
         } else {
             // 回到 SaveStack.setjmp
             C_Static.tasks_map[n->coroutine->co_id] = (CO_TCB *)n;
@@ -527,13 +549,13 @@ static void _Task(CO_Thread *coroutine)
 }
 
 /**
- * @brief    上下文切换
+ * @brief    上下文切换【共享栈】
  * @param    coroutine
  * @param    timeout
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2022-08-31
  */
-static void ContextSwitch(volatile CO_TCB *n)
+static void ContextSwitch_Shared(volatile CO_TCB *n)
 {
     // 保存环境,回到调度器
     int ret = _c_setjmp(((CO_TCB *)n)->env);
@@ -573,6 +595,53 @@ static void ContextSwitch(volatile CO_TCB *n)
     return;
 }
 
+#if !COROUTINE_ONLY_SHARED_STACK
+/**
+ * @brief    上下文切换【独立栈】
+ * @param    n              
+ * @return   * void         
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-03
+ */
+static void ContextSwitch_Standalone(volatile CO_TCB *n)
+{
+    // 保存环境,回到调度器
+    int ret = _c_setjmp(((CO_TCB *)n)->env);
+    if (ret == 0) {
+        volatile STACK_TYPE __mem = 0x11223344;               // 利用局部变量获取堆栈寄存器值
+        n->p_stack                = ((STACK_TYPE *)&__mem);   // 获取栈结尾
+        n->p_stack -= 4;
+        // 检查栈哨兵
+        if (n->stack[0] != STACK_SENTRY || n->stack[n->stack_alloc - 1] != STACK_SENTRY) {
+            // 栈错误
+            if (Inter.events->stackError)
+                Inter.events->stackError(Inter.events->object, n, n->name);
+            while (true) {
+                if (Inter.events->Idle)
+                    Inter.events->Idle(UINT32_MAX, Inter.events->object);
+            }
+        }
+        // 检查栈溢出
+        if (n->p_stack <= n->stack) {
+            // 栈溢出
+            if (Inter.events->stackError)
+                Inter.events->stackError(Inter.events->object, n, n->name);
+            while (true) {
+                if (Inter.events->Idle)
+                    Inter.events->Idle(UINT32_MAX, Inter.events->object);
+            }
+        }
+        // 计算栈大小
+        n->stack_len = n->stack_alloc - (n->p_stack - n->stack);
+        // 记录最大栈大小
+        if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
+        // 回到调度器
+        longjmp(n->coroutine->env, 1);
+    }
+    return;
+}
+#endif
+
 /**
  * @brief    转交控制权
  * @param    coroutine      线程实例
@@ -595,7 +664,12 @@ static void _Yield(CO_Thread *coroutine, uint32_t timeout)
         n->timeout = timeout;
     }
     // 保存堆栈数据
-    ContextSwitch(n);
+    if (n->isSharedStack)
+        ContextSwitch_Shared(n);   // 共享栈
+#if !COROUTINE_ONLY_SHARED_STACK
+    else
+        ContextSwitch_Standalone(n);   // 独立栈
+#endif
     return;
 }
 
@@ -667,27 +741,35 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
                                 Coroutine_Task func,
                                 void *         pars,
                                 uint8_t        pri,
-                                const char *   name)
+                                const char *   name,
+                                uint32_t       stack_size,
+                                bool           isSharedStack)
 {
     if (func == nullptr)
         return nullptr;
     if (coroutine == nullptr)
         return nullptr;
-    CO_TCB *n = (CO_TCB *)Inter.Malloc(sizeof(CO_TCB), __FILE__, __LINE__);
+    stack_size = ALIGN(stack_size, sizeof(STACK_TYPE));
+    CO_TCB *n  = (CO_TCB *)Inter.Malloc(sizeof(CO_TCB), __FILE__, __LINE__);
     if (n == nullptr) {
         if (Inter.events->Allocation != nullptr)
             Inter.events->Allocation(__LINE__, sizeof(CO_TCB), Inter.events->object);
         return nullptr;
     }
     memset(n, 0, sizeof(CO_TCB));
+#if COROUTINE_ONLY_SHARED_STACK
+    n->isSharedStack = true;
+#else
+    n->isSharedStack = isSharedStack;
+#endif
     n->func          = func;
     n->obj           = pars;
     n->stack         = nullptr;
     n->coroutine     = coroutine;
     n->isRun         = true;
     n->isFirst       = true;
-    n->stack         = (STACK_TYPE *)Inter.Malloc(128 * sizeof(STACK_TYPE), __FILE__, __LINE__);   // 预分配 512 字节
-    n->stack_alloc   = 128;
+    n->stack         = (STACK_TYPE *)Inter.Malloc(stack_size * sizeof(STACK_TYPE), __FILE__, __LINE__);   // 预分配 512 字节
+    n->stack_alloc   = stack_size;
     n->init_priority = n->priority = pri;
     CM_NodeLink_Init(&n->link);
     if (name != nullptr && name[0] != '\0') {
@@ -701,6 +783,11 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
         if (s > 31) s = 31;
         memcpy(n->name, name, s + 1);
     }
+#if !COROUTINE_SHARED_STACK
+    // 初始化栈空间
+    memset(n->stack, 0xEE, n->stack_alloc * sizeof(STACK_TYPE));
+    n->stack[0] = n->stack[n->stack_alloc - 1] = STACK_SENTRY;   // 设置哨兵
+#endif
     CO_Lock();
     // 添加到任务列表
     coroutine->task_count++;
@@ -712,48 +799,53 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
     return n;
 }
 
-/**
- * @brief    添加协程任务
- * @param    c              协程实例
- * @param    func           执行函数
- * @param    pars           执行参数
- * @return   int            任务id 0：创建失败
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-15
- */
-static Coroutine_TaskId Coroutine_AddTask(int            co_idx,
-                                          Coroutine_Task func,
-                                          void *         pars,
-                                          uint8_t        pri,
-                                          const char *   name)
+static Coroutine_TaskId Coroutine_AddTask(Coroutine_Task                 func,
+                                          void *                         pars,
+                                          const char *                   name,
+                                          const Coroutine_TaskAttribute *attr)
 {
-    CO_Thread *coroutine = nullptr;
-    if (co_idx < 0) {
-        // 寻址负载小的线程分配
-        uint32_t run_load = UINT32_MAX;   // 运行负载
-        uint32_t run_num  = UINT32_MAX;   // 运行数量
-        uint64_t now      = Inter.GetMillisecond();
-        int      n        = rand() % Inter.thread_count;
-        CO_Lock();
-        // 随机起始
-        CM_NodeLinkList_t list = C_Static.threads;
-        for (int i = 0; i < n; i++)
-            CM_NodeLink_Next(list);
-        CM_NodeLink_Foreach_Positive(CO_Thread, link, list, p)
-        {
-            uint64_t tv = now - p->start_time;
-            if (tv == 0) tv = 1;
-            uint32_t load = p->run_time * 1000 / tv;
-            if (load < run_load || (load == run_load && p->task_count < run_num)) {
-                run_load  = load;
-                run_num   = p->task_count;
-                coroutine = p;
+    CO_Thread *coroutine     = nullptr;
+    int        co_idx        = attr == nullptr ? -1 : attr->co_idx;
+    uint8_t    pri           = attr == nullptr ? TASK_PRI_NORMAL : attr->pri;
+    bool       isSharedStack = attr == nullptr ? false : attr->isSharedStack;
+    uint32_t   stack_size    = 0;
+    if (isSharedStack) {
+        stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 512 字节栈空间
+        if (stack_size == 0) stack_size = 512;
+    } else {
+        stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 4KB 栈空间
+        if (stack_size == 0) stack_size = 4096;
+    }
+    if (Inter.thread_count == 1) {
+        coroutine = C_Static.coroutines[0];
+    } else {
+        if (co_idx < 0) {
+            // 寻址负载小的线程分配
+            uint32_t run_load = UINT32_MAX;   // 运行负载
+            uint32_t run_num  = UINT32_MAX;   // 运行数量
+            uint64_t now      = Inter.GetMillisecond();
+            int      n        = rand() % Inter.thread_count;
+            CO_Lock();
+            // 随机起始
+            CM_NodeLinkList_t list = C_Static.threads;
+            for (int i = 0; i < n; i++)
+                CM_NodeLink_Next(list);
+            CM_NodeLink_Foreach_Positive(CO_Thread, link, list, p)
+            {
+                uint64_t tv = now - p->start_time;
+                if (tv == 0) tv = 1;
+                uint32_t load = p->run_time * 1000 / tv;
+                if (load < run_load || (load == run_load && p->task_count < run_num)) {
+                    run_load  = load;
+                    run_num   = p->task_count;
+                    coroutine = p;
+                }
             }
-        }
-        CO_UnLock();
-    } else
-        coroutine = GetCurrentThread(co_idx);
-    return AddTask(coroutine, func, pars, pri, name);
+            CO_UnLock();
+        } else
+            coroutine = GetCurrentThread(co_idx);
+    }
+    return AddTask(coroutine, func, pars, pri, name, stack_size, isSharedStack);
 }
 
 /**
@@ -1064,9 +1156,10 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
         char stack[32];
         int  len = co_snprintf(stack,
                               sizeof(stack),
-                              "%u/%u",
-                              p->stack_len * sizeof(size_t),
-                              p->stack_max * sizeof(size_t));
+                              "%u/%u/%u",
+                              p->stack_len * sizeof(STACK_TYPE),
+                              p->stack_max * sizeof(STACK_TYPE),
+                              p->stack_alloc * sizeof(STACK_TYPE));
         for (; len < max_stack; len++)
             stack[len] = ' ';
         stack[len] = '\0';
@@ -1093,9 +1186,10 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
             break;
         idx += co_snprintf(buf + idx,
                            max_size - idx,
-                           "   %s   ",
-                           p->coroutine->idx_task == p ? "R" : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? "W"
-                                                                                                                 : "S");
+                           "  %c%c   ",
+                           p->isSharedStack ? 'S' : 'M',
+                           p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W'
+                                                                                                                 : 'S');
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
@@ -1104,12 +1198,16 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", time);
         if (idx >= max_size)
             break;
-        idx += co_snprintf(buf + idx, max_size - idx, "%-10u ", (uint32_t)(p->execv_time == 0 || p->execv_time <= ts ? 0 : p->execv_time - ts));
+        uint64_t tv = p->execv_time == 0 || p->execv_time <= ts ? 0 : p->execv_time - ts;
+        if (tv >= (UINT32_MAX >> 1))
+            idx += co_snprintf(buf + idx, max_size - idx, "----       ");
+        else
+            idx += co_snprintf(buf + idx, max_size - idx, "%-10u ", (uint32_t)(tv));
         if (idx >= max_size)
             break;
-        uint64_t tv = p->watchdog.expiration_time - Inter.GetMillisecond();
-        if (tv >= UINT32_MAX || p->watchdog.expiration_time == 0)
-            idx += co_snprintf(buf + idx, max_size - idx, "----     ");
+        tv = p->watchdog.expiration_time - Inter.GetMillisecond();
+        if (tv >= (UINT32_MAX >> 1) || p->watchdog.expiration_time == 0)
+            idx += co_snprintf(buf + idx, max_size - idx, "----       ");
         else
             idx += co_snprintf(buf + idx, max_size - idx, "%-10u ", (uint32_t)tv);
         idx += co_snprintf(buf + idx, max_size - idx, "%-32s", p->name == nullptr ? "" : p->name);
@@ -1147,7 +1245,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     idx += co_snprintf(buf + idx, max_size - idx, "Pri ");
     idx += co_snprintf(buf + idx, max_size - idx, "Status ");
     // 打印堆栈大小
-    int max_stack = 13;
+    int max_stack = 20;
     int max_run   = 13;
     idx += co_snprintf(buf + idx, max_size - idx, "Stack ");
     for (int i = 5; i < max_stack; i++)
@@ -1372,38 +1470,48 @@ static bool WaitSemaphore(Coroutine_Semaphore _sem, uint32_t val, uint32_t timeo
     CO_TCB *       task = c->idx_task;
     SemaphoreNode *n    = &task->wait_sem;
     bool           isOk = false;
-    // 检查信号值，没有就加入等待列表
-    CO_Lock();
-    if (sem->value >= val) {
-        sem->value -= val;
-        isOk = true;
-    } else {
-        n->isOk      = false;
-        n->number    = val;
-        n->task      = task;
-        n->semaphore = sem;
-        // 加入等待列表
-        CM_NodeLink_Insert(&sem->list, CM_NodeLink_End(sem->list), &n->link);
-        // 设置等待标志
-        task->isWaitSem = true;
-        // 计数
-        sem->wait_count++;
-    }
-    CO_UnLock();
-    if (isOk) {
-        _Yield(c, 0);
-        return true;
-    }
-    // 等待
-    _Yield(c, timeout);
-    // 移除等待列表
-    CO_Lock();
-    if (n->isOk)
-        isOk = true;
-    CM_NodeLink_Remove(&sem->list, &n->link);
-    task->isWaitSem = false;
-    sem->wait_count--;
-    CO_UnLock();
+    uint64_t       now  = Inter.GetMillisecond();
+    do {
+        // 检查信号值，没有就加入等待列表
+        CO_Lock();
+        if (sem->value >= val) {
+            sem->value -= val;
+            isOk = true;
+        } else {
+            n->isOk      = false;
+            n->number    = val;
+            n->task      = task;
+            n->semaphore = sem;
+            // 加入等待列表
+            CM_NodeLink_Insert(&sem->list, CM_NodeLink_End(sem->list), &n->link);
+            // 设置等待标志
+            task->isWaitSem = true;
+            // 计数
+            sem->wait_count++;
+        }
+        CO_UnLock();
+        if (isOk) {
+            // 已经获取到信号，直接返回
+            return true;
+        }
+        uint64_t tv = Inter.GetMillisecond() - now;
+        if (tv >= (uint64_t)timeout) {
+            _Yield(c, 0);
+            return false;
+        }
+        // 计算剩余等待时间
+        tv = timeout - tv;
+        // 等待
+        _Yield(c, tv);
+        // 移除等待列表
+        CO_Lock();
+        if (n->isOk)
+            isOk = true;
+        CM_NodeLink_Remove(&sem->list, &n->link);
+        task->isWaitSem = false;
+        sem->wait_count--;
+        CO_UnLock();
+    } while (!isOk && Inter.GetMillisecond() - now < timeout);
     return isOk;
 }
 
@@ -1444,48 +1552,57 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
     CO_Thread *c = GetCurrentThread(-1);
     if (mutex == nullptr || c == nullptr || c->idx_task == nullptr)
         return false;
-    CO_TCB *task = c->idx_task;
-    bool    isOk = false;
-    CO_Lock();
-    if (mutex->owner == task) {
-        // 已经锁定
-        mutex->value++;
-        isOk = true;
-    } else if (mutex->owner == nullptr) {
-        // 获取锁
-        mutex->owner           = task;
-        mutex->value           = 1;
-        task->wait_mutex.mutex = mutex;
-        isOk                   = true;
-    } else {
-        CO_TCB *owner = mutex->owner;
-        if (owner->priority > task->priority) {
-            // 优先级提升
-            if (owner->isAddRunList)
-                AddTaskList(owner, task->priority);
-            else
-                owner->priority = task->priority;
+    CO_TCB * task = c->idx_task;
+    bool     isOk = false;
+    uint64_t now  = Inter.GetMillisecond();
+    do {
+        CO_Lock();
+        if (mutex->owner == task) {
+            // 已经锁定
+            mutex->value++;
+            isOk = true;
+        } else if (mutex->owner == nullptr) {
+            // 获取锁
+            mutex->owner           = task;
+            mutex->value           = 1;
+            task->wait_mutex.mutex = mutex;
+            isOk                   = true;
+        } else {
+            CO_TCB *owner = mutex->owner;
+            if (owner->priority > task->priority) {
+                // 优先级提升
+                if (owner->isAddRunList)
+                    AddTaskList(owner, task->priority);
+                else
+                    owner->priority = task->priority;
+            }
+            // 等待锁
+            CM_NodeLink_Insert(&mutex->list, CM_NodeLink_End(mutex->list), &task->wait_mutex.link);
+            task->wait_mutex.mutex = mutex;
+            task->isWaitMutex      = true;
+            mutex->wait_count++;
         }
-        // 等待锁
-        CM_NodeLink_Insert(&mutex->list, CM_NodeLink_End(mutex->list), &task->wait_mutex.link);
-        task->wait_mutex.mutex = mutex;
-        task->isWaitMutex      = true;
-        mutex->wait_count++;
-    }
-    CO_UnLock();
-    if (isOk)
-        return true;
-    // 等待
-    _Yield(c, timeout);
-    // 移除等待列表
-    CO_Lock();
-    CM_NodeLink_Remove(&mutex->list, &task->wait_mutex.link);
-    task->wait_mutex.mutex = nullptr;
-    if (task->isWaitMutex)
-        mutex->wait_count--;
-    task->isWaitMutex = false;
-    isOk              = mutex->owner == task;
-    CO_UnLock();
+        CO_UnLock();
+        if (isOk) return true;   // 获取锁成功
+        uint64_t tv = Inter.GetMillisecond() - now;
+        if (tv >= (uint64_t)timeout) {
+            _Yield(c, 0);
+            return false;
+        }
+        // 计算剩余等待时间
+        tv = timeout - tv;
+        // 等待
+        _Yield(c, tv);
+        // 移除等待列表
+        CO_Lock();
+        CM_NodeLink_Remove(&mutex->list, &task->wait_mutex.link);
+        task->wait_mutex.mutex = nullptr;
+        if (task->isWaitMutex)
+            mutex->wait_count--;
+        task->isWaitMutex = false;
+        isOk              = mutex->owner == task;
+        CO_UnLock();
+    } while (!isOk && (Inter.GetMillisecond() - now) < timeout);
     return isOk;
 }
 
@@ -1618,7 +1735,7 @@ static void _ASyncTask(void *obj)
     return;
 }
 
-static Coroutine_ASync ASync(Coroutine_AsyncTask func, void *arg)
+static Coroutine_ASync ASync(Coroutine_AsyncTask func, void *arg, uint32_t stack_size)
 {
     if (func == nullptr)
         return nullptr;
@@ -1634,14 +1751,19 @@ static Coroutine_ASync ASync(Coroutine_AsyncTask func, void *arg)
     a->sem    = Coroutine.CreateSemaphore(name, 0);
     a->func   = func;
     a->object = arg;
-    Coroutine_TaskId taskId;
+    Coroutine_TaskId        taskId;
+    Coroutine_TaskAttribute atr;
+    memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
+    atr.stack_size = stack_size;
+    atr.pri        = TASK_PRI_NORMAL;
+    atr.co_idx     = -1;
     // 添加任务
-    if ((taskId = Coroutine.AddTask(-1, _ASyncTask, a, TASK_PRI_NORMAL, name)) == nullptr) {
+    if ((taskId = Coroutine.AddTask(_ASyncTask, a, name, &atr)) == nullptr) {
         Coroutine.DeleteSemaphore(a->sem);
         Inter.Free(a, __FILE__, __LINE__);
         return nullptr;
     }
-    snprintf(a->sem->name, sizeof(a->sem->name), "[%p:%X]", func, taskId);
+    snprintf(a->sem->name, sizeof(a->sem->name), "[%p:%llX]", func, (uint64_t)taskId);
     return a;
 }
 
@@ -1761,7 +1883,12 @@ static size_t Universal_RunTask(void (*fun)(void *pars),
                                 uint8_t     pri,
                                 const char *name)
 {
-    return (size_t)Coroutine_AddTask(-1, fun, pars, pri, name);
+    Coroutine_TaskAttribute attr;
+    memset(&attr, 0, sizeof(Coroutine_TaskAttribute));
+    attr.stack_size = stacks;
+    attr.pri        = pri;
+    attr.co_idx     = -1;
+    return (size_t)Coroutine_AddTask(fun, pars, name, &attr);
 }
 
 static size_t Universal_GetTaskId(void)
@@ -1771,7 +1898,7 @@ static size_t Universal_GetTaskId(void)
 
 static void *Universal_Async(void *(*fun)(void *pars), void *pars, uint32_t stacks)
 {
-    return (void *)ASync(fun, pars);
+    return (void *)ASync(fun, pars, stacks);
 }
 
 static bool Universal_AsyncWait(void *async, uint32_t timeout)

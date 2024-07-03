@@ -341,10 +341,6 @@ int UART_Write(size_t fd, const void *data, int len)
     DMA_Cmd(DMA1, cfg->dma_tx, ENABLE);
     __enable_irq();
 #else
-	if(cfg->tx->size)
-	{
-		while(true);
-	}
     uint8_t *p    = (uint8_t *)data;
 	uint64_t ts = GetMilliseconds();
     cfg->tx->buff = p + 1;
