@@ -200,10 +200,10 @@ int main()
 
     Coroutine_TaskAttribute atr;
     memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
-    atr.co_idx     = -1;
-    atr.stack_size = 1024 * 16;
-    atr.pri        = TASK_PRI_NORMAL;
-    atr.isSharedStack = true;
+    atr.co_idx        = -1;
+    atr.stack_size    = 1024 * 16;
+    atr.pri           = TASK_PRI_NORMAL;
+    atr.isSharedStack = false;
 
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task1, nullptr, "Task1", &atr);
@@ -212,6 +212,9 @@ int main()
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
     Sleep(rand() % 1000);
+
+    atr.isSharedStack = true;
+    atr.stack_size = 0;
     Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task5, &num, "Task5-1", &atr);

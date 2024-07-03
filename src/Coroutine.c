@@ -808,13 +808,14 @@ static Coroutine_TaskId Coroutine_AddTask(Coroutine_Task                 func,
     int        co_idx        = attr == nullptr ? -1 : attr->co_idx;
     uint8_t    pri           = attr == nullptr ? TASK_PRI_NORMAL : attr->pri;
     bool       isSharedStack = attr == nullptr ? false : attr->isSharedStack;
-#if COROUTINE_SHARED_STACK
-    uint32_t stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 512 字节栈空间
-    if (stack_size == 0) stack_size = 512;
-#else
-    uint32_t stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 4KB 栈空间
-    if (stack_size == 0) stack_size = 4096;
-#endif
+    uint32_t   stack_size    = 0;
+    if (isSharedStack) {
+        stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 512 字节栈空间
+        if (stack_size == 0) stack_size = 512;
+    } else {
+        stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 4KB 栈空间
+        if (stack_size == 0) stack_size = 4096;
+    }
     if (Inter.thread_count == 1) {
         coroutine = C_Static.coroutines[0];
     } else {

@@ -52,7 +52,8 @@
         "xutility": "cpp",
         "setjmp.h": "c",
         "*.platform": "c",
-        "coroutine.h": "c"
+        "coroutine.h": "c",
+        "stdint.h": "c"
     },
     "cmake.sourceDirectory": "/home/work/Coroutine/linux"
 }
