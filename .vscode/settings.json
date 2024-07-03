@@ -50,7 +50,9 @@
         "xtr1common": "cpp",
         "xtree": "cpp",
         "xutility": "cpp",
-        "setjmp.h": "c"
+        "setjmp.h": "c",
+        "*.platform": "c",
+        "coroutine.h": "c"
     },
     "cmake.sourceDirectory": "/home/work/Coroutine/linux"
 }
