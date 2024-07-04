@@ -62,20 +62,15 @@ while (true)
 extern "C" {
 #endif
 
+// 仅共享栈协程
 #ifndef COROUTINE_ONLY_SHARED_STACK
-#define COROUTINE_ONLY_SHARED_STACK 0   // 仅共享栈协程
+#define COROUTINE_ONLY_SHARED_STACK 0
 #endif
+// 任务调度时进行栈检查，会增加调度时间开销但能及时发现栈溢出的错误，适用于开发阶段
 #ifndef COROUTINE_CHECK_STACK
-#define COROUTINE_CHECK_STACK 0   // 任务调度时进行栈检查，会增加调度时间开销但能及时发现栈溢出的错误，适用于开发阶段
+#define COROUTINE_CHECK_STACK 0
 #endif
 
-#ifndef COROUTINE_DEF_STACK_SIZE
-#if defined(_ARMABI)
-#define COROUTINE_DEF_STACK_SIZE 1024 * 4   // 默认栈大小
-#else
-#define COROUTINE_DEF_STACK_SIZE 1024 * 16   // 默认栈大小
-#endif
-#endif
 
 // -------------- 独立栈协程 --------------
 // 优点：切换速度快

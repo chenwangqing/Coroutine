@@ -862,7 +862,7 @@ static Coroutine_TaskId Coroutine_AddTask(Coroutine_Task                 func,
     } else {
         stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 4KB 栈空间
         if (stack_size == 0)
-            stack_size = COROUTINE_DEF_STACK_SIZE;
+            stack_size = coroutine_get_stack_default_size();
     }
     if (Inter.thread_count == 1) {
         coroutine = C_Static.coroutines[0];

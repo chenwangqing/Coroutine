@@ -19,6 +19,21 @@
 #if !COROUTINE_ONLY_SHARED_STACK
 
 /**
+ * @brief    获取默认栈大小
+ * @return   uint32_t       
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-04
+ */
+uint32_t coroutine_get_stack_default_size(void)
+{
+#if defined(_ARMABI)
+    return 4 * 1024;
+#else
+    return 32 * 1024;
+#endif
+}
+
+/**
  * @brief    栈方向
  * @return   true           向地址高增长
  * @return   false          向地址低减少
