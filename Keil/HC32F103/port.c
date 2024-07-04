@@ -130,6 +130,7 @@ void UART_LOG(const void *data, int lens)
 
 static int _print(int level, const char *_file, int line, const char *fmt, ...)
 {
+    Coroutine.LockMutex(lock_log, UINT32_MAX);
     level = level < 0 ? 0 : (level > NPLOG_LEVEL_MAX ? NPLOG_LEVEL_MAX : level);
 
     char file[15 + 1];
@@ -169,11 +170,13 @@ static int _print(int level, const char *_file, int line, const char *fmt, ...)
     len += ff_vsnprintf(log_buf + len, sizeof(log_buf) - len, fmt, argptr);
     va_end(argptr);
     UART_LOG(log_buf, len);
+    Coroutine.UnlockMutex(lock_log);
     return len;
 }
 
 static void _PrintArray(int level, const char *_file, int line, const void *data, int lens)
 {
+    Coroutine.LockMutex(lock_log, UINT32_MAX);
     level = level < 0 ? 0 : (level > NPLOG_LEVEL_MAX ? NPLOG_LEVEL_MAX : level);
 
     char file[15 + 1];
@@ -218,6 +221,7 @@ static void _PrintArray(int level, const char *_file, int line, const void *data
     }
     len += ff_snprintf(log_buf + len, sizeof(log_buf) - len, "\r\n");
     UART_LOG(log_buf, len);
+    Coroutine.UnlockMutex(lock_log);
     return;
 }
 

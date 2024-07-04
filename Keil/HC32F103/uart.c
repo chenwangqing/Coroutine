@@ -22,8 +22,8 @@ typedef struct
 
 typedef struct
 {
-   volatile uint8_t *buff;
-   volatile size_t   size;
+    volatile uint8_t *buff;
+    volatile size_t   size;
 } TxNode;
 
 typedef struct
@@ -161,13 +161,13 @@ static void USART_IRQHandler(const UART_ConfigTypeDef *cfg)
         USART_ClearITPendingBit(cfg->interface, USART_IT_TC);
         if (cfg->tx->size) {
             ch = *cfg->tx->buff;
-			--cfg->tx->size;
-			++cfg->tx->buff;
+            --cfg->tx->size;
+            ++cfg->tx->buff;
             USART_SendData(cfg->interface, ch);
         } else if (cfg->tx->buff) {
             // 发送完成
             cfg->tx->buff = NULL;
-			cfg->tx->size = 0;
+            cfg->tx->size = 0;
             Coroutine.GiveSemaphore(sem_uart, 1);
         }
     }
@@ -341,16 +341,28 @@ int UART_Write(size_t fd, const void *data, int len)
     DMA_Cmd(DMA1, cfg->dma_tx, ENABLE);
     __enable_irq();
 #else
-    uint8_t *p    = (uint8_t *)data;
-	uint64_t ts = GetMilliseconds();
+
+    uint64_t ts = GetMilliseconds();
+    while (cfg->tx->size && GetMilliseconds() - ts <= 1000)
+        ;
+    if (cfg->tx->size)
+        return 0;
+    extern void CriticalSection(bool en);
+
+    uint8_t *p = (uint8_t *)data;
+    ts         = GetMilliseconds();
+    CriticalSection(true);
     cfg->tx->buff = p + 1;
     cfg->tx->size = len - 1;
     USART_SendData(cfg->interface, p[0]);
-	do{
-		Coroutine.WaitSemaphore(sem_uart, 1, 1000);   // 等待发送完成
-	}while(cfg->tx->size > 0 && GetMilliseconds() - ts <= 1000);
+    CriticalSection(false);
+    do {
+        Coroutine.WaitSemaphore(sem_uart, 1, 1000);   // 等待发送完成
+    } while (cfg->tx->size > 0 && GetMilliseconds() - ts <= 1000);
+    CriticalSection(true);
     cfg->tx->size = 0;
     cfg->tx->buff = NULL;
+    CriticalSection(false);
     // uint64_t ts      = GetMilliseconds();
     // for (int i = 0; i < len; i++) {
     //     USART_SendData(cfg->interface, p[i]);

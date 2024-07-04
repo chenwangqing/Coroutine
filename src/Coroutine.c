@@ -1271,6 +1271,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
 {
     if (buf == nullptr || max_size <= 0)
         return 0;
+    max_size--;
     int idx = 0;
     // ---------------------------------- 标题 ----------------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
