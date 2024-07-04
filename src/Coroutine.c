@@ -531,9 +531,18 @@ static void _enter_into(volatile CO_TCB *n)
             } else {
 #if !COROUTINE_ONLY_SHARED_STACK
                 // 栈对齐
-                STACK_TYPE *stack = (STACK_TYPE *)(n->stack + n->stack_alloc - 1);
-                while ((size_t)stack % sizeof(void *))
-                    stack--;
+                STACK_TYPE *stack = nullptr;
+                if (coroutine_get_stack_direction()) {
+                    // 栈向上增长
+                    stack = (STACK_TYPE *)(n->stack + 1);
+                    while ((size_t)stack % sizeof(void *))
+                        stack++;
+                } else {
+                    // 栈向下增长
+                    stack = (STACK_TYPE *)(n->stack + n->stack_alloc - 1);
+                    while ((size_t)stack % sizeof(void *))
+                        stack--;
+                }
                 // 使用新的栈进入函数
                 coroutine_enter_task(__task, (void *)n, stack);
 #endif
