@@ -204,8 +204,10 @@ int main(void)
     Coroutine.AddTask(Task2, nullptr, "Task2", &atr);
     Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
     Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
-    Coroutine.AddTask(Task5, nullptr, "Task5-1", &atr);
-    Coroutine.AddTask(Task6, nullptr, "Task5-2", &atr);
+    atr.isSharedStack = true;
+    atr.stack_size    = 0;
+    Coroutine.AddTask(Task5, &num, "Task5-1", &atr);
+    Coroutine.AddTask(Task6, &num, "Task5-2", &atr);
 
     while (true)
         Coroutine.RunTick();
