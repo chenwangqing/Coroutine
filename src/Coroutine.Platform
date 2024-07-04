@@ -26,6 +26,15 @@
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-07-03
  */
+#if defined(__ARMCC_VERSION)
+__asm void coroutine_enter_task(void *func, void *arg, int *stack)
+{
+    MOV R3, R0  // R3 = func
+	MOV R0, R1  // R0 = arg
+	MSR MSP, R2 // 切换栈
+	BX R3       // 执行func
+}
+#else
 void coroutine_enter_task(void *func, void *arg, int *stack)
 {
 #ifdef WIN32 // Windows x86
@@ -53,5 +62,6 @@ void coroutine_enter_task(void *func, void *arg, int *stack)
     #error "Coroutine.Platform: Unsupported platform!"
 #endif
 }
+#endif
 // clang-format on
 #endif   // !COROUTINE_SHARED_STACK

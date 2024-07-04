@@ -90,7 +90,7 @@ void Task3(void *obj)
             re = nullptr;
         }
         if (!re)
-            re = Coroutine.Async(Task3_Func, a);
+            re = Coroutine.Async(Task3_Func, a, 1024);
     }
     //    return;
 }
@@ -193,13 +193,19 @@ int main(void)
     sem_uart = Coroutine.CreateSemaphore("sem_uart", 0);
     int num  = 0;
 
+    Coroutine_TaskAttribute atr;
+    memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
+    atr.co_idx        = -1;
+    atr.stack_size    = 1024;
+    atr.pri           = TASK_PRI_NORMAL;
+    atr.isSharedStack = false;
     // 添加任务
-    Coroutine.AddTask(-1, Task1, nullptr, TASK_PRI_NORMAL, "Task1");
-    Coroutine.AddTask(-1, Task2, nullptr, TASK_PRI_NORMAL, "Task2");
-    Coroutine.AddTask(-1, Task3, nullptr, TASK_PRI_NORMAL, "Task3");
-    Coroutine.AddTask(-1, Task4, nullptr, TASK_PRI_NORMAL, "Task4");
-    Coroutine.AddTask(-1, Task5, &num, TASK_PRI_LOWEST, "Task5-1");
-    Coroutine.AddTask(-1, Task6, &num, TASK_PRI_NORMAL, "Task5-2");
+    Coroutine.AddTask(Task1, nullptr, "Task1", &atr);
+    Coroutine.AddTask(Task2, nullptr, "Task2", &atr);
+    Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
+    Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
+    Coroutine.AddTask(Task5, nullptr, "Task5-1", &atr);
+    Coroutine.AddTask(Task6, nullptr, "Task5-2", &atr);
 
     while (true)
         Coroutine.RunTick();

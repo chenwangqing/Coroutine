@@ -69,6 +69,14 @@ extern "C" {
 #define COROUTINE_CHECK_STACK 0   // 任务调度时进行栈检查，会增加调度时间开销但能及时发现栈溢出的错误，适用于开发阶段
 #endif
 
+#ifndef COROUTINE_DEF_STACK_SIZE
+#if defined(_ARMABI)
+#define COROUTINE_DEF_STACK_SIZE 1024 * 4   // 默认栈大小
+#else
+#define COROUTINE_DEF_STACK_SIZE 1024 * 16   // 默认栈大小
+#endif
+#endif
+
 // -------------- 独立栈协程 --------------
 // 优点：切换速度快
 // 缺点：占用内存大，容易造成栈溢出，某个任务都需要分配较大的栈空间
@@ -200,7 +208,7 @@ typedef struct
     int      co_idx;          // 协程索引 小于SetInter设置的线程数量 -1: 随机分配 默认：-1
     uint8_t  pri;             // 优先级  TASK_PRI_LOWEST ~ TASK_PRI_HIGHEST 默认：TASK_PRI_NORMAL
     bool     isSharedStack;   // 是否共享栈 默认：false
-    uint32_t stack_size;      // 栈大小 字节 0：使用默认 共享栈默认：512 独立栈默认：4KB 共享栈会自动根据使用情况分配
+    uint32_t stack_size;      // 栈大小 字节 0：使用默认 共享栈默认：512 独立栈默认：根据实际平台分配 共享栈会自动根据使用情况分配
 } Coroutine_TaskAttribute;
 
 typedef struct
