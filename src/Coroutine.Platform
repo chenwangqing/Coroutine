@@ -34,13 +34,20 @@ void coroutine_enter_task(void *func, void *arg, int *stack)
         mov eax, dword ptr[func]
         mov ebx, dword ptr[arg]
         mov ecx, dword ptr[stack]
-        // 3. 切换栈
+        // 2. 切换栈
         mov esp, ecx
-        // 4. 设置函数参数
+        // 3. 设置函数参数
         push ebx
-        // 5. 调用函数
+        // 4. 调用函数
         call eax
     }
+#elif defined(__linux__) && defined(__x86_64__) // Linux x86_64
+    __asm__ __volatile__(
+        "mov %%rcx, %%rsp\n" // 2. 切换栈
+        "mov %%rbx, %%rdi\n" // 3. 设置函数参数
+        "call *%%rax\n"      // 4. 调用函数
+        :
+        : "a"(func),"b"(arg),"c"(stack));
 #else
     // TODO: 其他平台的实现
     #error "Coroutine.Platform: Unsupported platform!"

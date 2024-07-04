@@ -486,11 +486,15 @@ static void _enter_into(volatile CO_TCB *n)
             // 第一次运行
             if (n->isSharedStack) {
                 // 直接进入函数
-                __task(n);
+                __task((CO_TCB *)n);
             } else {
 #if !COROUTINE_ONLY_SHARED_STACK
+                // 栈对齐
+                STACK_TYPE *stack = (STACK_TYPE *)(n->stack + n->stack_alloc - 1);
+                while ((size_t)stack % sizeof(void *))
+                    stack--;
                 // 使用新的栈进入函数
-                coroutine_enter_task(__task, n, n->stack + n->stack_alloc - 1);
+                coroutine_enter_task(__task, (void *)n, stack);
 #endif
             }
             // 不会执行到这里
@@ -615,7 +619,7 @@ static void ContextSwitch_Standalone(volatile CO_TCB *n)
         if (n->stack[0] != STACK_SENTRY || n->stack[n->stack_alloc - 1] != STACK_SENTRY) {
             // 栈错误
             if (Inter.events->stackError)
-                Inter.events->stackError(Inter.events->object, n, n->name);
+                Inter.events->stackError(Inter.events->object, (Coroutine_TaskId)n, n->name);
             while (true) {
                 if (Inter.events->Idle)
                     Inter.events->Idle(UINT32_MAX, Inter.events->object);
@@ -625,7 +629,7 @@ static void ContextSwitch_Standalone(volatile CO_TCB *n)
         if (n->p_stack <= n->stack) {
             // 栈溢出
             if (Inter.events->stackError)
-                Inter.events->stackError(Inter.events->object, n, n->name);
+                Inter.events->stackError(Inter.events->object, (Coroutine_TaskId)n, n->name);
             while (true) {
                 if (Inter.events->Idle)
                     Inter.events->Idle(UINT32_MAX, Inter.events->object);
@@ -1188,8 +1192,7 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
                            max_size - idx,
                            "  %c%c   ",
                            p->isSharedStack ? 'S' : 'M',
-                           p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W'
-                                                                                                                 : 'S');
+                           p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W' : 'S');
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);

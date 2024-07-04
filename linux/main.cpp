@@ -26,10 +26,14 @@ void Task1(void *obj)
     while (true) {
         Coroutine.FeedDog(30 * 1000);
         PrintMemory();
-        std::string str = "hello";
-        int         ms  = (rand() % 750) + 250;
-        uint64_t    ts  = Task1_func1(ms);
+        volatile int a1  = 12345678;
+        std::string  str = "hello";
+        volatile int a2  = 72345671;
+        int          ms  = (rand() % 750) + 250;
+        uint64_t     ts  = Task1_func1(ms);
         str += std::to_string(i);
+        a1++;
+        a2++;
         printf("[%llu][1][%llu/%d]i = %d %s\n", Coroutine.GetMillisecond(), ts, ms, i++, str.c_str());
 #if 0
         Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str.c_str(), str.size(), 1000);
@@ -87,7 +91,7 @@ void Task3(void *obj)
             re = nullptr;
         }
         if (!re)
-            re = Coroutine.Async(func, a);
+            re = Coroutine.Async(func, a, 0);
     }
     return;
 }
@@ -117,14 +121,14 @@ void Task5(void *obj)
     int     *num = (int *)obj;
     for (int i = 0; i < 100; i++) {
         Coroutine.FeedDog(30 * 1000);
-        while (!Coroutine.LockMutex(lock, 1000000));
+        Coroutine.LockMutex(lock, UINT32_MAX);
         (*num)++;
         Coroutine.YieldDelay(100);
         (*num)++;
         Coroutine.UnlockMutex(lock);
         Coroutine.Yield();
     }
-    while (!Coroutine.LockMutex(lock, 1000000));
+    Coroutine.LockMutex(lock, UINT32_MAX);
     ts = Coroutine.GetMillisecond() - ts;
     printf("[%llu][5]----------------------- num = %d %llu -----------------------\n", Coroutine.GetMillisecond(), *num, ts);
     Coroutine.UnlockMutex(lock);
@@ -137,16 +141,16 @@ void Task6(void *obj)
     int     *num = (int *)obj;
     for (int i = 0; i < 100; i++) {
         Coroutine.FeedDog(30 * 1000);
-        while (!Coroutine.LockMutex(lock, 1000000));
+        Coroutine.LockMutex(lock, UINT32_MAX);
         (*num)++;
-        while (!Coroutine.LockMutex(lock, 1000000));
+        Coroutine.LockMutex(lock, UINT32_MAX);
         Coroutine.YieldDelay(100);
         Coroutine.UnlockMutex(lock);
         (*num)++;
         Coroutine.UnlockMutex(lock);
         Coroutine.Yield();
     }
-    while (!Coroutine.LockMutex(lock, 1000000));
+    Coroutine.LockMutex(lock, UINT32_MAX);
     ts = Coroutine.GetMillisecond() - ts;
     printf("[%llu][6]----------------------- num = %d %llu -----------------------\n", Coroutine.GetMillisecond(), *num, ts);
     Coroutine.UnlockMutex(lock);
@@ -160,8 +164,15 @@ static void *RUNTask(void *obj)
     return nullptr;
 }
 
+static void TestTask(void *func)
+{
+    printf("a = %p", func);
+    return;
+}
+
 int main()
 {
+    TestTask((void *)TestTask);
     extern const Coroutine_Inter *GetInter(void);
     auto                          inter = GetInter();
     Coroutine.SetInter(inter);
@@ -174,18 +185,28 @@ int main()
     lock    = Coroutine.CreateMutex("lock");
     int num = 0;
 
+    Coroutine_TaskAttribute atr;
+    memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
+    atr.co_idx        = -1;
+    atr.stack_size    = 1024 * 16;
+    atr.pri           = TASK_PRI_NORMAL;
+    atr.isSharedStack = false;
+
     Sleep(rand() % 1000);
-    Coroutine.AddTask(-1, Task1, nullptr, TASK_PRI_NORMAL, "Task1");
+    Coroutine.AddTask(Task1, nullptr, "Task1", &atr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(-1, Task2, nullptr, TASK_PRI_NORMAL, "Task2");
+    Coroutine.AddTask(Task2, nullptr, "Task2", &atr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(-1, Task3, nullptr, TASK_PRI_NORMAL, "Task3");
+    Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(-1, Task4, nullptr, TASK_PRI_NORMAL, "Task4");
+
+    atr.isSharedStack = true;
+    atr.stack_size    = 0;
+    Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(-1, Task5, &num, TASK_PRI_LOWEST, "Task5-1");
+    Coroutine.AddTask(Task5, &num, "Task5-1", &atr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(-1, Task6, &num, TASK_PRI_NORMAL, "Task5-2");
+    Coroutine.AddTask(Task6, &num, "Task5-2", &atr);
     while (true)
         Sleep(1000);
     return 0;
