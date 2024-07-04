@@ -74,6 +74,7 @@ static size_t GetThreadId(void)
 
 static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, const char *name)
 {
+    return;
     while (true) {
         printf("\nWatchdogTimeout: %p %s\n", taskId, name);
         Sleep(1000);

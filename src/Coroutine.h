@@ -2,7 +2,7 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.16
+ * @version  1.17
  * @date     2022-08-15
  *
  * @copyright Copyright (c) 2022  Four-Faith
@@ -27,6 +27,7 @@
  * <tr><td>2024-06-28 <td>1.14    <td>CXS    <td>取消显示协程控制器，自动根据线程id分配控制器
  * <tr><td>2024-07-01 <td>1.15    <td>CXS    <td>添加看门狗；添加优先级
  * <tr><td>2024-07-03 <td>1.16    <td>CXS    <td>添加独立栈
+ * <tr><td>2024-07-04 <td>1.17    <td>CXS    <td>独立栈动态分配线程运行
  * </table>
  *
  * @note
