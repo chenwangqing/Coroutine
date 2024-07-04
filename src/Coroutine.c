@@ -266,6 +266,47 @@ static void                   DeleteMessage(Coroutine_MailData *dat);
 static Coroutine_Handle       Coroutine_Create(size_t id);
 volatile static func_setjmp_t _c_setjmp = setjmp;
 
+// 栈错误
+#define ERROR_STACK(t)                                                                \
+    if (Inter.events->stackError)                                                     \
+        Inter.events->stackError(Inter.events->object, (Coroutine_TaskId)t, t->name); \
+    while (true) {                                                                    \
+        if (Inter.events->Idle)                                                       \
+            Inter.events->Idle(UINT32_MAX, Inter.events->object);                     \
+    }
+
+// 检查栈哨兵
+#define CHECK_STACK_SENTRY(n)                                                          \
+    if (n->stack[0] != STACK_SENTRY || n->stack[n->stack_alloc - 1] != STACK_SENTRY) { \
+        ERROR_STACK(n);                                                                \
+    }
+
+/**
+ * @brief    检查任务栈
+ * @param    t              
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-04
+ */
+static void CheckStack(volatile CO_TCB *t)
+{
+    if (t->isSharedStack)
+        return;
+    uint32_t *p = (uint32_t *)t->stack;
+    CHECK_STACK_SENTRY(t);
+    uint32_t idx = 1;
+    for (idx; idx < t->stack_alloc - 1; idx++) {
+        if (p[idx] != 0xEEEEEEEE)
+            break;
+    }
+    if (idx == 1) {
+        /* 栈错误 */
+        ERROR_STACK(t);
+    }
+    uint32_t s = t->stack_alloc - idx;
+    if (s > t->stack_max) t->stack_max = s;
+    return;
+}
+
 /**
  * @brief    删除任务
  * @param    inter
@@ -615,30 +656,21 @@ static void ContextSwitch_Standalone(volatile CO_TCB *n)
         volatile STACK_TYPE __mem = 0x11223344;               // 利用局部变量获取堆栈寄存器值
         n->p_stack                = ((STACK_TYPE *)&__mem);   // 获取栈结尾
         n->p_stack -= 4;
-        // 检查栈哨兵
-        if (n->stack[0] != STACK_SENTRY || n->stack[n->stack_alloc - 1] != STACK_SENTRY) {
-            // 栈错误
-            if (Inter.events->stackError)
-                Inter.events->stackError(Inter.events->object, (Coroutine_TaskId)n, n->name);
-            while (true) {
-                if (Inter.events->Idle)
-                    Inter.events->Idle(UINT32_MAX, Inter.events->object);
-            }
-        }
         // 检查栈溢出
         if (n->p_stack <= n->stack) {
             // 栈溢出
-            if (Inter.events->stackError)
-                Inter.events->stackError(Inter.events->object, (Coroutine_TaskId)n, n->name);
-            while (true) {
-                if (Inter.events->Idle)
-                    Inter.events->Idle(UINT32_MAX, Inter.events->object);
-            }
+            ERROR_STACK(n);
         }
         // 计算栈大小
         n->stack_len = n->stack_alloc - (n->p_stack - n->stack);
         // 记录最大栈大小
         if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
+#if COROUTINE_CHECK_STACK
+        CheckStack(n);
+#else
+        // 检查栈哨兵
+        CHECK_STACK_SENTRY(n);
+#endif
         // 回到调度器
         longjmp(n->coroutine->env, 1);
     }
@@ -788,9 +820,11 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
         memcpy(n->name, name, s + 1);
     }
 #if !COROUTINE_SHARED_STACK
-    // 初始化栈空间
-    memset(n->stack, 0xEE, n->stack_alloc * sizeof(STACK_TYPE));
-    n->stack[0] = n->stack[n->stack_alloc - 1] = STACK_SENTRY;   // 设置哨兵
+    if (n->isSharedStack == 0) {
+        // 初始化栈空间
+        memset(n->stack, 0xEE, n->stack_alloc * sizeof(STACK_TYPE));
+        n->stack[0] = n->stack[n->stack_alloc - 1] = STACK_SENTRY;   // 设置哨兵
+    }
 #endif
     CO_Lock();
     // 添加到任务列表
@@ -1154,6 +1188,7 @@ static size_t co_snprintf(char *buf, size_t size, const char *fmt, ...)
 static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int max_run, int count)
 {
     if (max_size <= 0 || p == nullptr) return 0;
+    CheckStack(p);   // 检查栈
     uint64_t ts  = Inter.GetMillisecond();
     int      idx = 0;
     do {
@@ -1192,7 +1227,8 @@ static int _PrintInfoTask(char *buf, int max_size, CO_TCB *p, int max_stack, int
                            max_size - idx,
                            "  %c%c   ",
                            p->isSharedStack ? 'S' : 'M',
-                           p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W' : 'S');
+                           p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W'
+                                                                                                                 : 'S');
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);

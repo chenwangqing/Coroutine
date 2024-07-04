@@ -65,6 +65,10 @@ extern "C" {
 #ifndef COROUTINE_ONLY_SHARED_STACK
 #define COROUTINE_ONLY_SHARED_STACK 0   // 仅共享栈协程
 #endif
+#ifndef COROUTINE_CHECK_STACK
+#define COROUTINE_CHECK_STACK 0   // 任务调度时进行栈检查，会增加调度时间开销但能及时发现栈溢出的错误，适用于开发阶段
+#endif
+
 // -------------- 独立栈协程 --------------
 // 优点：切换速度快
 // 缺点：占用内存大，容易造成栈溢出，某个任务都需要分配较大的栈空间
