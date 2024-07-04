@@ -394,7 +394,9 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
         task->isAddStopList = 1;
     } else if (task->isDel || now >= task->execv_time) {   // 加入运行列表
 #if !COROUTINE_ONLY_SHARED_STACK
-        if (task->isSharedStack || Inter.thread_count == 1) {
+        if (task->isSharedStack ||
+            Inter.thread_count == 1 ||
+            !coroutine_is_dynamic_run_thread()) {
             // 共享栈，加入本协程控制器
             CM_NodeLink_Insert(&coroutine->tasks_run[task->priority],
                                CM_NodeLink_End(coroutine->tasks_run[task->priority]),
@@ -1417,7 +1419,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     uint64_t run_time = 0;
     for (size_t i = 0; i < Inter.thread_count; i++)
         run_time += C_Static.coroutines[i]->run_time;
-    if (run_time == 0)run_time = 1;
+    if (run_time == 0) run_time = 1;
     CM_NodeLink_Foreach_Positive(CO_Thread, link, C_Static.threads, coroutine)
     {
         int count = 0;
