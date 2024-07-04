@@ -294,7 +294,7 @@ static void CheckStack(volatile CO_TCB *t)
     uint32_t *p = (uint32_t *)t->stack;
     CHECK_STACK_SENTRY(t);
     uint32_t idx = 1;
-    for (idx; idx < t->stack_alloc - 1; idx++) {
+    for (; idx < t->stack_alloc - 1; idx++) {
         if (p[idx] != 0xEEEEEEEE)
             break;
     }
