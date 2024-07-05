@@ -128,18 +128,18 @@ typedef struct
     size_t thread_count;   // 线程数量
 
     /**
-    * @brief    加锁，临界保护
+    * @brief    进入临界保护
     * @author   CXS (chenxiangshu@outlook.com)
     * @date     2024-06-26
     */
-    void (*Lock)(const char *file, int line);
+    void (*EnterCriticalSection)(const char *file, int line);
 
     /**
-    * @brief    解锁，临界保护
+    * @brief    推出临界保护
     * @author   CXS (chenxiangshu@outlook.com)
     * @date     2024-06-26
     */
-    void (*Unlock)(const char *file, int line);
+    void (*LeaveCriticalSection)(const char *file, int line);
 
     /**
     * @brief    内存分配
@@ -200,7 +200,7 @@ typedef struct _C_MailData
  */
 typedef struct
 {
-    int      co_idx;          // 协程索引 小于SetInter设置的线程数量 -1: 随机分配 默认：-1
+    int      co_idx;          // 绑定协程索引 小于SetInter设置的线程数量 -1: 随机分配 默认：-1
     uint8_t  pri;             // 优先级  TASK_PRI_LOWEST ~ TASK_PRI_HIGHEST 默认：TASK_PRI_NORMAL
     bool     isSharedStack;   // 是否共享栈 默认：false
     uint32_t stack_size;      // 栈大小 字节 0：使用默认 共享栈默认：512 独立栈默认：根据实际平台分配 共享栈会自动根据使用情况分配

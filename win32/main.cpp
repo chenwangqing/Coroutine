@@ -213,8 +213,8 @@ int main()
     Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
     Sleep(rand() % 1000);
 
-    atr.isSharedStack = true;
-    atr.stack_size = 0;
+    /*atr.isSharedStack = true;
+    atr.stack_size = 0;*/
     Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task5, &num, "Task5-1", &atr);
