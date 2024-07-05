@@ -662,7 +662,7 @@ static void _Task(CO_Thread *coroutine)
     coroutine->task_start_time = Inter.GetMillisecond();
     // 获取下一个任务
     CO_EnterCriticalSection();
-    CheckWatchdog(coroutine);
+    CheckWatchdog();
     sleep_ms = GetSleepTask(coroutine, coroutine->task_start_time);
     GetNextTask(coroutine);
     n = coroutine->idx_task;
@@ -1346,8 +1346,7 @@ static int _PrintInfoTask(char *   buf,
                            max_size - idx,
                            "  %c%c   ",
                            p->isSharedStack ? 'S' : 'M',
-                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W'
-                                                                                                                                            : 'S');
+                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W' : 'S');
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
