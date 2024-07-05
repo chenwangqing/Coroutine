@@ -5,7 +5,8 @@ typedef uint32_t jmp_buf[6];
 #else
 #include <setjmp.h>
 #endif
-#include "Coroutine.Platform"
+#include "Coroutine.Platform.h"
+#include "RBTree.h"
 
 typedef int STACK_TYPE;   // 栈类型
 
@@ -186,7 +187,8 @@ struct _CO_TCB
         uint64_t      expiration_time;   // 看门狗过期时间 0：不启用
     } watchdog;
 
-    CM_NodeLink_t link;   // _CO_TCB
+    CM_NodeLink_t    link;         // _CO_TCB
+    CM_RBTree_Link_t sleep_link;   // 睡眠节点
 };
 
 /**
@@ -210,8 +212,9 @@ struct _CO_Thread
     uint32_t             task_count;        // 任务计数
 
     CM_NodeLinkList_t tasks_run[MAX_PRIORITY_NUM];   // 运行任务列表 CO_TCB，根据优先级
-    CM_NodeLinkList_t tasks_sleep;                   // 睡眠任务列表 CO_TCB
     CM_NodeLinkList_t tasks_stop;                    // 停止列表 CO_TCB
+    CM_RBTree_t       tasks_sleep;                   // 睡眠任务列表 CO_TCB
+    CO_TCB *          idx_sleep;                     // 当前休眠任务
 
     CM_NodeLink_t link;   // _CO_Thread
 };
@@ -361,7 +364,13 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
         CM_NodeLink_Remove(&coroutine->tasks_run[task->priority], &task->link);
         task->isAddRunList = 0;
     } else if (task->isAddSleepList) {
-        CM_NodeLink_Remove(&coroutine->tasks_sleep, &task->link);
+        // 从休眠树中移除
+        CM_RBTree_Remove(&coroutine->tasks_sleep, &task->sleep_link);
+        if (task == coroutine->idx_sleep) {
+            // 更新当前休眠任务
+            CM_RBTree_Link_t *link = CM_RBTree_LeftEnd(&coroutine->tasks_sleep);
+            coroutine->idx_sleep   = link == nullptr ? nullptr : CM_Field_ToType(CO_TCB, sleep_link, link);
+        }
         task->isAddSleepList = 0;
     } else if (task->isAddStopList) {
         CM_NodeLink_Remove(&coroutine->tasks_stop, &task->link);
@@ -399,41 +408,13 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
             task->isAddRunStandaloneList = 1;
             C_Static.wait_run_standalone_task_count++;
         }
-    } else {   // 加入休眠列表，从小到大
+    } else {
+        // 加入休眠列表
         coroutine->task_count++;
-        if (CM_NodeLink_IsEmpty(coroutine->tasks_sleep)) {
-            CM_NodeLink_Init(&task->link);
-            coroutine->tasks_sleep = &task->link;
-        } else {
-            CO_TCB *e = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_End(coroutine->tasks_sleep));
-            CO_TCB *s = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_sleep));
-            if (e->execv_time <= task->execv_time) {
-                // 加入到最后
-                CM_NodeLink_Insert(&coroutine->tasks_sleep,
-                                   CM_NodeLink_End(coroutine->tasks_sleep),
-                                   &task->link);
-            } else if (s->execv_time > task->execv_time) {
-                // 加入到头部
-                CM_NodeLink_Insert(&coroutine->tasks_sleep,
-                                   CM_NodeLink_End(coroutine->tasks_sleep),
-                                   &task->link);
-                coroutine->tasks_sleep = &task->link;
-            } else {
-                // 遍历寻找插入位置
-                CO_TCB *r = e;
-                CM_NodeLink_Foreach_Positive(CO_TCB, link, coroutine->tasks_sleep, p)
-                {
-                    if (p->execv_time > task->execv_time) {
-                        r = p;
-                        break;
-                    }
-                }
-                CM_NodeLink_Insert(&coroutine->tasks_sleep,
-                                   r->link.up,
-                                   &task->link);
-            }
-        }
+        CM_RBTree_Insert(&coroutine->tasks_sleep, &task->sleep_link);
         task->isAddSleepList = 1;
+        if (coroutine->idx_sleep == nullptr || coroutine->idx_sleep->execv_time > task->execv_time)
+            coroutine->idx_sleep = task;   // 当前休眠任务设置为最早的任务
     }
     return;
 }
@@ -448,9 +429,9 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
  */
 static uint32_t GetSleepTask(CO_Thread *coroutine, uint64_t ts)
 {
-    if (CM_NodeLink_IsEmpty(coroutine->tasks_sleep))
+    if (coroutine->idx_sleep == nullptr)
         return 0;
-    CO_TCB *task = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_sleep));
+    CO_TCB *task = coroutine->idx_sleep;
     if (ts >= task->execv_time) {
         // 移除休眠列表,加入运行列表
         AddTaskList(task, task->priority);
@@ -463,7 +444,7 @@ static CO_TCB *GetNextTask_LocalTask(CO_Thread *coroutine, uint8_t pri)
 {
     CO_TCB *task = nullptr;
     if (!CM_NodeLink_IsEmpty(coroutine->tasks_run[pri])) {
-        task = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_run[pri]));
+        task = CM_Field_ToType(CO_TCB, link, CM_NodeLink_First(coroutine->tasks_run[pri]));
         // 移除运行列表
         CM_NodeLink_Remove(&coroutine->tasks_run[pri], &task->link);
         task->isAddRunList = 0;
@@ -476,7 +457,7 @@ static CO_TCB *GetNextTask_StandaloneTask(CO_Thread *coroutine, uint8_t pri)
 {
     CO_TCB *task = nullptr;
     if (!CM_NodeLink_IsEmpty(C_Static.standalone_tasks_run[pri])) {
-        task = CM_NodeLink_ToType(CO_TCB, link, CM_NodeLink_First(C_Static.standalone_tasks_run[pri]));
+        task = CM_Field_ToType(CO_TCB, link, CM_NodeLink_First(C_Static.standalone_tasks_run[pri]));
         // 移除运行列表
         CM_NodeLink_Remove(&C_Static.standalone_tasks_run[pri], &task->link);
         task->isAddRunStandaloneList = 0;
@@ -540,7 +521,7 @@ static void CheckWatchdog(void)
     if (Inter.GetMillisecond() < C_Static.check_watchdog_time || CM_NodeLink_IsEmpty(C_Static.watchdogs))
         return;
     C_Static.check_watchdog_time = Inter.GetMillisecond() + 10;   // 每 10ms 检查一次
-    CO_TCB *t                    = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(C_Static.watchdogs));
+    CO_TCB *t                    = CM_Field_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(C_Static.watchdogs));
     if (t->watchdog.expiration_time < Inter.GetMillisecond()) {
         // 看门狗超时
         if (Inter.events->watchdogTimeout != nullptr)
@@ -812,7 +793,7 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
             Inter.events->Allocation(__LINE__, sizeof(CO_TCB), Inter.events->object);
         return nullptr;
     }
-    memset(n, 0, sizeof(CO_TCB));
+    CM_ZERO(n);
     n->func            = func;
     n->obj             = pars;
     n->stack           = nullptr;
@@ -861,7 +842,6 @@ static Coroutine_TaskId Coroutine_AddTask(Coroutine_Task                 func,
     uint32_t   stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 4KB 栈空间
     if (stack_size == 0)
         stack_size = C_Static.def_stack_size;
-
     if (Inter.thread_count == 1)
         coroutine = C_Static.coroutines[0];
     else if (co_idx >= 0)
@@ -997,7 +977,7 @@ static void DeleteMailbox(Coroutine_Mailbox mb)
     CO_EnterCriticalSection();
     // 删除所有信息
     while (!CM_NodeLink_IsEmpty(mb->mails)) {
-        Coroutine_MailData *md = CM_NodeLink_ToType(Coroutine_MailData, link, CM_NodeLink_First(mb->mails));
+        Coroutine_MailData *md = CM_Field_ToType(Coroutine_MailData, link, CM_NodeLink_First(mb->mails));
         CM_NodeLink_Remove(&mb->mails, &md->link);
         DeleteMessage(md);
     }
@@ -1019,7 +999,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
         uint64_t       now = Inter.GetMillisecond();
         CM_NodeLink_t *p   = CM_NodeLink_First(mb->mails);
         while (p != nullptr && mb->size < data->size + sizeof(Coroutine_MailData)) {
-            Coroutine_MailData *md = CM_NodeLink_ToType(Coroutine_MailData, link, p);
+            Coroutine_MailData *md = CM_Field_ToType(Coroutine_MailData, link, p);
             if (md->expiration_time <= now) {
                 // 删除过期
                 mb->size += md->size + sizeof(Coroutine_MailData);
@@ -1045,7 +1025,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
     if (!CM_NodeLink_IsEmpty(mb->waits)) {
         CM_NodeLink_t *p = CM_NodeLink_First(mb->waits);
         while (true) {
-            MailWaitNode *n = CM_NodeLink_ToType(MailWaitNode, link, p);
+            MailWaitNode *n = CM_Field_ToType(MailWaitNode, link, p);
             if (n->id_mask & data->eventId) {
                 n->data = data;
                 // 开始执行
@@ -1084,7 +1064,7 @@ static Coroutine_MailData *GetMail(Coroutine_Mailbox mb,
     if (!CM_NodeLink_IsEmpty(mb->mails)) {
         CM_NodeLink_t *p = CM_NodeLink_First(mb->mails);
         while (true) {
-            Coroutine_MailData *md = CM_NodeLink_ToType(Coroutine_MailData, link, p);
+            Coroutine_MailData *md = CM_Field_ToType(Coroutine_MailData, link, p);
             if (md->expiration_time <= now) {
                 // 超时
                 Coroutine_MailData *t = md;
@@ -1245,6 +1225,31 @@ static int _PrintInfoTask(char *   buf,
     return idx;
 }
 
+typedef struct
+{
+    uint64_t run_time;
+    int      max_run;
+    int      max_stack;
+    int      max_size;
+    char *   buf;
+    int *    idx;
+    int *    count;
+} tasks_sleep_cm_rbtree_callback_traverse_pars_t;
+
+static bool tasks_sleep_cm_rbtree_callback_traverse(const CM_RBTree_t *tree, const CM_RBTree_Link_t *node, void *object)
+{
+    tasks_sleep_cm_rbtree_callback_traverse_pars_t *p    = (tasks_sleep_cm_rbtree_callback_traverse_pars_t *)object;
+    CO_TCB *                                        task = CM_Field_ToType(CO_TCB, sleep_link, node);
+    *(p->idx) += _PrintInfoTask(p->buf + *(p->idx),
+                                p->max_size - *(p->idx),
+                                task,
+                                p->max_stack,
+                                p->max_run,
+                                (*p->count)++,
+                                p->run_time);
+    return true;
+}
+
 /**
  * @brief    显示协程信息
  * @param    c              协程实例
@@ -1306,10 +1311,17 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
                 idx += _PrintInfoTask(buf + idx, max_size - idx, task, max_stack, max_run, count++, run_time);
             }
         }
-        CM_NodeLink_Foreach_Positive(CO_TCB, link, coroutine->tasks_sleep, task)
-        {
-            idx += _PrintInfoTask(buf + idx, max_size - idx, task, max_stack, max_run, count++, run_time);
-        }
+        // 显示休眠列表
+        tasks_sleep_cm_rbtree_callback_traverse_pars_t pars;
+        pars.buf       = buf;
+        pars.idx       = &idx;
+        pars.count     = &count;
+        pars.max_stack = max_stack;
+        pars.max_run   = max_run;
+        pars.max_size  = max_size;
+        pars.run_time  = run_time;
+        CM_RBTree_Traverse(&coroutine->tasks_sleep, 0, tasks_sleep_cm_rbtree_callback_traverse, &pars);
+        // 显示停止列表
         CM_NodeLink_Foreach_Positive(CO_TCB, link, coroutine->tasks_stop, task)
         {
             idx += _PrintInfoTask(buf + idx, max_size - idx, task, max_stack, max_run, count++, run_time);
@@ -1467,7 +1479,7 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
     CO_EnterCriticalSection();
     sem->value += val;
     while (!CM_NodeLink_IsEmpty(sem->list)) {
-        SemaphoreNode *n = CM_NodeLink_ToType(SemaphoreNode, link, CM_NodeLink_First(sem->list));
+        SemaphoreNode *n = CM_Field_ToType(SemaphoreNode, link, CM_NodeLink_First(sem->list));
         if (n == nullptr || n->number > sem->value)
             break;
         sem->value -= n->number;
@@ -1669,9 +1681,9 @@ static void UnlockMutex(Coroutine_Mutex mutex)
             mutex->owner = nullptr;
             // 唤醒等待队列
             if (!CM_NodeLink_IsEmpty(mutex->list)) {
-                task = CM_NodeLink_ToType(CO_TCB,
-                                          wait_mutex.link,
-                                          CM_NodeLink_First(mutex->list));
+                task = CM_Field_ToType(CO_TCB,
+                                       wait_mutex.link,
+                                       CM_NodeLink_First(mutex->list));
                 // 计数等待时间
                 uint64_t tv  = task->execv_time - task->timeout;
                 uint64_t now = Inter.GetMillisecond();
@@ -1703,6 +1715,17 @@ static void UnlockMutex(Coroutine_Mutex mutex)
     return;
 }
 
+static int __tasks_sleep_cm_rbtree_callback_compare(const CM_RBTree_t *     tree,
+                                                    const CM_RBTree_Link_t *new_val,
+                                                    const CM_RBTree_Link_t *val)
+{
+    CO_TCB *new_task = CM_Field_ToType(CO_TCB, sleep_link, new_val);
+    CO_TCB *task     = CM_Field_ToType(CO_TCB, sleep_link, val);
+    if (new_task->execv_time < task->execv_time)
+        return TREE_LEFT;
+    return TREE_RIGHT;
+}
+
 /**
  * @brief    创建协程
  * @return   Coroutine_Handle    nullptr 表示创建失败
@@ -1717,10 +1740,11 @@ static Coroutine_Handle Coroutine_Create(size_t id)
             Inter.events->Allocation(__LINE__, sizeof(CO_Thread), Inter.events->object);
         return nullptr;
     }
-    memset(c, 0, sizeof(CO_Thread));
+    CM_ZERO(c);
     c->isRun      = true;
     c->start_time = Inter.GetMillisecond();
     c->ThreadId   = id;
+    CM_RBTree_Init(&c->tasks_sleep, __tasks_sleep_cm_rbtree_callback_compare);
     CO_EnterCriticalSection();
     CM_NodeLink_Insert(&C_Static.threads, CM_NodeLink_End(C_Static.threads), &c->link);
     CO_LeaveCriticalSection();
@@ -1853,8 +1877,8 @@ static void FeedDog(uint32_t time)
             CM_NodeLink_Init(&task->watchdog.link);
             C_Static.watchdogs = &task->watchdog.link;
         } else {
-            CO_TCB *s = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(C_Static.watchdogs));
-            CO_TCB *e = CM_NodeLink_ToType(CO_TCB, watchdog.link, CM_NodeLink_End(C_Static.watchdogs));
+            CO_TCB *s = CM_Field_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(C_Static.watchdogs));
+            CO_TCB *e = CM_Field_ToType(CO_TCB, watchdog.link, CM_NodeLink_End(C_Static.watchdogs));
             if (s->watchdog.expiration_time > task->watchdog.expiration_time) {
                 // 添加到头
                 CM_NodeLink_Insert(&C_Static.watchdogs, CM_NodeLink_End(C_Static.watchdogs), &task->watchdog.link);

@@ -52,17 +52,6 @@ extern void CM_NodeLink_Insert(CM_NodeLinkList_t *list, CM_NodeLink_t *node, CM_
 extern CM_NodeLink_t *CM_NodeLink_Remove(CM_NodeLinkList_t *list, CM_NodeLink_t *link);
 
 /**
- * @brief    获取节点的结构体
- * @param    Type           结构体类型
- * @param    link_field     连接字段
- * @param    link           连接点
- * @note     Node *p = NodeLink_ToType(Node, link, a);
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2023-08-18
- */
-#define CM_NodeLink_ToType(Type, link_field, link) CM_Field_ToType(Type, link_field, link)
-
-/**
  * @brief    初始化连接
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2023-08-18
@@ -101,10 +90,10 @@ extern CM_NodeLink_t *CM_NodeLink_Remove(CM_NodeLinkList_t *list, CM_NodeLink_t 
  * @date     2023-08-18
  */
 #define CM_NodeLink_Foreach_Positive(Type, link_field, list, iter)                                               \
-    Type *CM_S_S(__list, __LINE__) = (list) == nullptr ? nullptr : CM_NodeLink_ToType(Type, link_field, list);   \
+    Type *CM_S_S(__list, __LINE__) = (list) == nullptr ? nullptr : CM_Field_ToType(Type, link_field, list);   \
     for (Type *iter = CM_S_S(__list, __LINE__), *__flag = nullptr, *__for_p_list_ptr = CM_S_S(__list, __LINE__); \
          nullptr != __for_p_list_ptr && (nullptr == __flag || iter != __for_p_list_ptr);                         \
-         iter = CM_NodeLink_ToType(Type, link_field, iter->link_field.next), __flag = __for_p_list_ptr)
+         iter = CM_Field_ToType(Type, link_field, iter->link_field.next), __flag = __for_p_list_ptr)
 
 /**
  * @brief    逆序遍历
@@ -120,10 +109,10 @@ extern CM_NodeLink_t *CM_NodeLink_Remove(CM_NodeLinkList_t *list, CM_NodeLink_t 
  * @date     2023-08-18
  */
 #define CM_NodeLink_Foreach_Reverse(Type, link_field, list, iter)                                                               \
-    Type *CM_S_S(__list, __LINE__) = (list) == nullptr ? nullptr : CM_NodeLink_ToType(Type, link_field, CM_NodeLink_End(list)); \
+    Type *CM_S_S(__list, __LINE__) = (list) == nullptr ? nullptr : CM_Field_ToType(Type, link_field, CM_NodeLink_End(list)); \
     for (Type *iter = CM_S_S(__list, __LINE__), *__flag = nullptr, *__for_r_list_ptr = CM_S_S(__list, __LINE__);                \
          nullptr != __for_r_list_ptr && (nullptr == __flag || iter != __for_r_list_ptr);                                        \
-         iter = CM_NodeLink_ToType(Type, link_field, iter->link_field.up), __flag = __for_r_list_ptr)
+         iter = CM_Field_ToType(Type, link_field, iter->link_field.up), __flag = __for_r_list_ptr)
 
 #define CM_NODELINK_MODE_POSITIVE CM_NodeLink_Foreach_Positive   // 正序
 #define CM_NODELINK_MODE_REVERSE  CM_NodeLink_Foreach_Reverse   // 逆序

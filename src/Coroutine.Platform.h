@@ -4,9 +4,9 @@
  * @author   CXS (chenxiangshu@outlook.com)
  * @version  1.0
  * @date     2024-07-03
- * 
+ *
  * @copyright Copyright (c) 2024  Four-Faith
- * 
+ *
  * @par 修改日志:
  * <table>
  * <tr><th>日期       <th>版本    <th>作者    <th>说明
@@ -23,18 +23,18 @@
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-07-04
  */
-bool coroutine_is_dynamic_run_thread(void)
+static inline bool coroutine_is_dynamic_run_thread(void)
 {
     return true;
 }
 
 /**
  * @brief    获取默认栈大小
- * @return   uint32_t       
+ * @return   uint32_t
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-07-04
  */
-uint32_t coroutine_get_stack_default_size(void)
+static inline uint32_t coroutine_get_stack_default_size(void)
 {
 #if defined(_ARMABI)
     return 4 * 1024;
@@ -50,14 +50,14 @@ uint32_t coroutine_get_stack_default_size(void)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-07-04
  */
-bool coroutine_get_stack_direction(void)
+static inline bool coroutine_get_stack_direction(void)
 {
     return false;
 }
 
 // clang-format off
 #if defined(__ARMCC_VERSION) // Arm Cortex-M
-__asm void coroutine_enter_task(void *func, void *arg, int *stack)
+static inline __asm void coroutine_enter_task(void *func, void *arg, int *stack)
 {
     MOV R3, R0  // R3 = func
 	MOV R0, R1  // R0 = arg
@@ -65,7 +65,7 @@ __asm void coroutine_enter_task(void *func, void *arg, int *stack)
 	BX R3       // 执行func
 }
 #elif defined(WIN32) && defined(_MSC_VER) // Windows x86 MSVC
-void coroutine_enter_task(void *func, void *arg, int *stack)
+static inline void coroutine_enter_task(void *func, void *arg, int *stack)
 {
     __asm {
         // 1. 获取参数到寄存器
@@ -81,7 +81,7 @@ void coroutine_enter_task(void *func, void *arg, int *stack)
     }
 }
 #elif defined(__linux__) && defined(__x86_64__) // Linux x86_64
-void coroutine_enter_task(void *func, void *arg, int *stack)
+static inline void coroutine_enter_task(void *func, void *arg, int *stack)
 {
     __asm__ __volatile__(
         "mov %%rcx, %%rsp\n" // 2. 切换栈
@@ -91,7 +91,7 @@ void coroutine_enter_task(void *func, void *arg, int *stack)
         : "a"(func),"b"(arg),"c"(stack));
 }
 #elif defined(__linux__) && defined(__arm__) // Linux arm32
-void coroutine_enter_task(void *func, void *arg, int *stack)
+static inline void coroutine_enter_task(void *func, void *arg, int *stack)
 {
     #warning "Coroutine.Platform: no test"
     __asm__ __volatile__(
@@ -103,7 +103,7 @@ void coroutine_enter_task(void *func, void *arg, int *stack)
         : "r"(func),"r"(arg),"r"(stack));
 }
 #elif defined(__linux__) && defined(__aarch64__ ) // Linux arm64
-void coroutine_enter_task(void *func, void *arg, int *stack)
+static inline void coroutine_enter_task(void *func, void *arg, int *stack)
 {
     #warning "Coroutine.Platform: no test"
     __asm__ __volatile__(

@@ -27,6 +27,9 @@
     <ClCompile Include="..\src\NodeLink.c">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\RBTree.c">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\Coroutine.h">
@@ -39,6 +42,9 @@
       <Filter>源文件</Filter>
     </ClInclude>
     <ClInclude Include="..\src\Universal.h">
+      <Filter>源文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\RBTree.h">
       <Filter>源文件</Filter>
     </ClInclude>
   </ItemGroup>

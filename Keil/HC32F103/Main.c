@@ -195,17 +195,14 @@ int main(void)
 
     Coroutine_TaskAttribute atr;
     memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
-    atr.co_idx        = -1;
-    atr.stack_size    = 1024;
-    atr.pri           = TASK_PRI_NORMAL;
-    atr.isSharedStack = false;
+    atr.co_idx     = -1;
+    atr.stack_size = 1024;
+    atr.pri        = TASK_PRI_NORMAL;
     // 添加任务
     Coroutine.AddTask(Task1, nullptr, "Task1", &atr);
     Coroutine.AddTask(Task2, nullptr, "Task2", &atr);
     Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
     Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
-    atr.isSharedStack = true;
-    atr.stack_size    = 0;
     Coroutine.AddTask(Task5, &num, "Task5-1", &atr);
     Coroutine.AddTask(Task6, &num, "Task5-2", &atr);
 

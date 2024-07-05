@@ -92,7 +92,7 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
     }
 }
 
-#define MAX_THREADS 3
+#define MAX_THREADS 1
 
 static HANDLE sem_sleep[MAX_THREADS];
 static bool   is_sem_sleep[MAX_THREADS];
