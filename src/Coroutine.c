@@ -154,7 +154,6 @@ struct _CO_TCB
     uint32_t       stack_len;                    // 当前栈长度
     uint32_t       stack_max;                    // 最大长度
     uint32_t       stack_alloc;                  // 分配长度
-    uint16_t       isSharedStack : 1;            // 是否共享栈
     uint16_t       isDel : 1;                    // 是否删除
     uint16_t       isRun : 1;                    // 正在运行
     uint16_t       isWaitMail : 1;               // 正在等待邮件
@@ -173,8 +172,6 @@ struct _CO_TCB
     void *         obj;                          // 执行参数
     CO_Thread *    coroutine;                    // 父节点
     STACK_TYPE *   stack;                        // 栈缓存
-    STACK_TYPE *   p_stack;                      // 栈
-    STACK_TYPE *   s, *p;                        // 临时变量
 
     SemaphoreNode wait_sem;    // 信号等待节点
     MailWaitNode  wait_mail;   // 邮件等待节点
@@ -253,7 +250,6 @@ static struct
     CM_NodeLinkList_t mailboxes;             // 邮箱列表
     CM_NodeLinkList_t mutexes;               // 互斥列表 _CO_Mutex
     CO_Thread **      coroutines;            // 协程控制器
-    volatile CO_TCB **tasks_map;             // 任务映射表 根据协程id 用于上下文切换
     CM_NodeLinkList_t watchdogs;             // 看门狗列表 CO_TCB 从小到大
     uint64_t          check_watchdog_time;   // 看门狗检查时间
 #if !COROUTINE_ONLY_SHARED_STACK
@@ -263,15 +259,8 @@ static struct
     uint32_t def_stack_size;   // 默认栈大小
 } C_Static;
 
-#define CO_EnterCriticalSection()                       \
-    do {                                                \
-        Inter.EnterCriticalSection(__FILE__, __LINE__); \
-    } while (false);
-
-#define CO_LeaveCriticalSection()                       \
-    do {                                                \
-        Inter.LeaveCriticalSection(__FILE__, __LINE__); \
-    } while (false);
+#define CO_EnterCriticalSection() Inter.EnterCriticalSection(__FILE__, __LINE__)
+#define CO_LeaveCriticalSection() Inter.LeaveCriticalSection(__FILE__, __LINE__);
 
 static void                   DeleteMessage(Coroutine_MailData *dat);
 static Coroutine_Handle       Coroutine_Create(size_t id);
@@ -300,8 +289,6 @@ volatile static func_setjmp_t _c_setjmp = setjmp;
  */
 static void CheckStack(volatile CO_TCB *t)
 {
-    if (t->isSharedStack)
-        return;
     uint32_t *p = (uint32_t *)t->stack;
     CHECK_STACK_SENTRY(t);
     uint32_t idx = 1;
@@ -394,9 +381,7 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
                            &task->link);
         task->isAddStopList = 1;
     } else if (task->isDel || now >= task->execv_time) {   // 加入运行列表
-#if !COROUTINE_ONLY_SHARED_STACK
-        if (task->isSharedStack ||
-            task->isDynamicThread == 0 ||
+        if (task->isDynamicThread == 0 ||
             Inter.thread_count == 1 ||
             !coroutine_is_dynamic_run_thread()) {
             // 共享栈，加入本协程控制器
@@ -414,13 +399,6 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
             task->isAddRunStandaloneList = 1;
             C_Static.wait_run_standalone_task_count++;
         }
-#else
-        CM_NodeLink_Insert(&coroutine->tasks_run[task->priority],
-                           CM_NodeLink_End(coroutine->tasks_run[task->priority]),
-                           &task->link);
-        task->isAddRunList = 1;
-        coroutine->wait_run_task_count++;
-#endif
     } else {   // 加入休眠列表，从小到大
         coroutine->task_count++;
         if (CM_NodeLink_IsEmpty(coroutine->tasks_sleep)) {
@@ -616,33 +594,25 @@ static void _enter_into(volatile CO_TCB *n)
             // 设置已运行标志
             n->isFirst = false;
             // 第一次运行
-            if (n->isSharedStack) {
-                // 直接进入函数
-                __task((CO_TCB *)n);
+            // 栈对齐
+            STACK_TYPE *stack = nullptr;
+            if (coroutine_get_stack_direction()) {
+                // 栈向上增长
+                stack = (STACK_TYPE *)(n->stack + 1);
+                while ((size_t)stack % sizeof(void *))
+                    stack++;
             } else {
-#if !COROUTINE_ONLY_SHARED_STACK
-                // 栈对齐
-                STACK_TYPE *stack = nullptr;
-                if (coroutine_get_stack_direction()) {
-                    // 栈向上增长
-                    stack = (STACK_TYPE *)(n->stack + 1);
-                    while ((size_t)stack % sizeof(void *))
-                        stack++;
-                } else {
-                    // 栈向下增长
-                    stack = (STACK_TYPE *)(n->stack + n->stack_alloc - 1);
-                    while ((size_t)stack % sizeof(void *))
-                        stack--;
-                }
-                // 使用新的栈进入函数
-                coroutine_enter_task(__task, (void *)n, stack);
-#endif
+                // 栈向下增长
+                stack = (STACK_TYPE *)(n->stack + n->stack_alloc - 1);
+                while ((size_t)stack % sizeof(void *))
+                    stack--;
             }
-            // 不会执行到这里
+            // 使用新的栈进入函数
+            coroutine_enter_task(__task, (void *)n, stack);
+            //! 不会执行到这里
         } else {
             // 回到 SaveStack.setjmp
-            C_Static.tasks_map[n->coroutine->co_id] = (CO_TCB *)n;
-            longjmp(((CO_TCB *)n)->env, n->coroutine->co_id + 1);
+            longjmp(((CO_TCB *)n)->env, 1);
         }
     }
     return;
@@ -656,10 +626,8 @@ static void _enter_into(volatile CO_TCB *n)
  */
 static void _Task(CO_Thread *coroutine)
 {
-    volatile uint32_t flag1    = 0x55667788;
     volatile CO_TCB * n        = nullptr;
     volatile uint32_t sleep_ms = UINT32_MAX;
-    volatile uint32_t flag2    = 0x55667788;
     coroutine->task_start_time = Inter.GetMillisecond();
     // 获取下一个任务
     CO_EnterCriticalSection();
@@ -681,12 +649,15 @@ static void _Task(CO_Thread *coroutine)
         }
         return;
     }
+    // 执行任务
     _enter_into(n);
     // 记录运行时间
     uint64_t ts = Inter.GetMillisecond();
     uint64_t tv = ts <= coroutine->task_start_time ? 0 : ts - coroutine->task_start_time;
-    coroutine->run_time += tv;
-    n->run_time += tv;
+    if (tv) {
+        coroutine->run_time += tv;
+        n->run_time += tv;
+    }
     coroutine->idx_task = nullptr;
     // 添加到运行列表
     CO_EnterCriticalSection();
@@ -696,59 +667,9 @@ static void _Task(CO_Thread *coroutine)
     // 周期事件
     if (Inter.events->Period != nullptr)
         Inter.events->Period(Inter.events->object);
-    (void)flag1;
-    (void)flag2;
     return;
 }
 
-/**
- * @brief    上下文切换【共享栈】
- * @param    coroutine
- * @param    timeout
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-31
- */
-static void ContextSwitch_Shared(volatile CO_TCB *n)
-{
-    // 保存环境,回到调度器
-    int ret = _c_setjmp(((CO_TCB *)n)->env);
-    if (ret == 0) {
-        volatile STACK_TYPE __mem = 0x11223344;   // 利用局部变量获取堆栈寄存器值
-        // 保存栈数据
-        n->p_stack = ((STACK_TYPE *)&__mem);   // 获取栈结尾
-        n->p_stack -= 4;
-        n->stack_len = n->coroutine->stack - n->p_stack;
-        if (n->stack_len > n->stack_alloc) {
-            if (n->stack != nullptr)
-                Inter.Free(n->stack, __FILE__, __LINE__);
-            n->stack_alloc = ALIGN(n->stack_len, 128) * 128;   // 按512字节分配，避免内存碎片
-            n->stack       = (STACK_TYPE *)Inter.Malloc(n->stack_alloc * sizeof(STACK_TYPE), __FILE__, __LINE__);
-        }
-        if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
-        if (n->stack == nullptr) {
-            // 内存分配错误
-            n->isDel = true;
-            if (Inter.events->Allocation != nullptr)
-                Inter.events->Allocation(__LINE__,
-                                         n->stack_len,
-                                         Inter.events->object);
-            return;
-        }
-        memcpy((char *)n->stack, (char *)n->p_stack, n->stack_len * sizeof(int));
-        // 回到调度器
-        longjmp(n->coroutine->env, 1);
-    } else {
-        n = *(C_Static.tasks_map + ret - 1);
-        // 恢复堆栈内容
-        n->p = n->p_stack + n->stack_len - 1;
-        n->s = n->stack + n->stack_len - 1;
-        while (n->s >= n->stack)   // 限制范围
-            *(n->p)-- = *(n->s)--;
-    }
-    return;
-}
-
-#if !COROUTINE_ONLY_SHARED_STACK
 /**
  * @brief    上下文切换【独立栈】
  * @param    n              
@@ -756,21 +677,21 @@ static void ContextSwitch_Shared(volatile CO_TCB *n)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-07-03
  */
-static void ContextSwitch_Standalone(volatile CO_TCB *n)
+static void ContextSwitch(volatile CO_TCB *n)
 {
     // 保存环境,回到调度器
     int ret = _c_setjmp(((CO_TCB *)n)->env);
     if (ret == 0) {
-        volatile STACK_TYPE __mem = 0x11223344;               // 利用局部变量获取堆栈寄存器值
-        n->p_stack                = ((STACK_TYPE *)&__mem);   // 获取栈结尾
-        n->p_stack -= 4;
+        volatile STACK_TYPE __mem   = 0x11223344;               // 利用局部变量获取堆栈寄存器值
+        STACK_TYPE *        p_stack = ((STACK_TYPE *)&__mem);   // 获取栈结尾
+        p_stack -= 4;
         // 检查栈溢出
-        if (n->p_stack <= n->stack) {
+        if (p_stack <= n->stack) {
             // 栈溢出
             ERROR_STACK(n);
         }
         // 计算栈大小
-        n->stack_len = n->stack_alloc - (n->p_stack - n->stack);
+        n->stack_len = n->stack_alloc - (p_stack - n->stack);
         // 记录最大栈大小
         if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
 #if COROUTINE_CHECK_STACK
@@ -784,7 +705,6 @@ static void ContextSwitch_Standalone(volatile CO_TCB *n)
     }
     return;
 }
-#endif
 
 /**
  * @brief    转交控制权
@@ -808,12 +728,7 @@ static void _Yield(CO_Thread *coroutine, uint32_t timeout)
         n->timeout = timeout;
     }
     // 保存堆栈数据
-    if (n->isSharedStack)
-        ContextSwitch_Shared(n);   // 共享栈
-#if !COROUTINE_ONLY_SHARED_STACK
-    else
-        ContextSwitch_Standalone(n);   // 独立栈
-#endif
+    ContextSwitch(n);
     return;
 }
 
@@ -886,8 +801,7 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
                                 void *         pars,
                                 uint8_t        pri,
                                 const char *   name,
-                                uint32_t       stack_size,
-                                bool           isSharedStack)
+                                uint32_t       stack_size)
 {
     if (func == nullptr)
         return nullptr;
@@ -899,11 +813,6 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
         return nullptr;
     }
     memset(n, 0, sizeof(CO_TCB));
-#if COROUTINE_ONLY_SHARED_STACK
-    n->isSharedStack = true;
-#else
-    n->isSharedStack = isSharedStack;
-#endif
     n->func            = func;
     n->obj             = pars;
     n->stack           = nullptr;
@@ -926,15 +835,12 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
         if (s > 31) s = 31;
         memcpy(n->name, name, s + 1);
     }
-#if !COROUTINE_SHARED_STACK
-    if (n->isSharedStack == 0) {
-        // 初始化栈空间
-        memset(n->stack, 0xEE, n->stack_alloc * sizeof(STACK_TYPE));
-        n->stack[0] = n->stack[n->stack_alloc - 1] = STACK_SENTRY;   // 设置哨兵
-    }
-#endif
-    CO_EnterCriticalSection();
+    // 初始化栈空间
+    memset(n->stack, 0xEE, n->stack_alloc * sizeof(STACK_TYPE));
+    // 设置哨兵
+    n->stack[0] = n->stack[n->stack_alloc - 1] = STACK_SENTRY;
     // 添加到任务列表
+    CO_EnterCriticalSection();
     AddTaskList(n, n->priority);
     uint16_t co_id = coroutine ? coroutine->co_id : GetSleepThread()->co_id;
     CO_LeaveCriticalSection();
@@ -949,53 +855,18 @@ static Coroutine_TaskId Coroutine_AddTask(Coroutine_Task                 func,
                                           const char *                   name,
                                           const Coroutine_TaskAttribute *attr)
 {
-    CO_Thread *coroutine = nullptr;
-    int        co_idx    = attr == nullptr ? -1 : attr->co_idx;
-    uint8_t    pri       = attr == nullptr ? TASK_PRI_NORMAL : attr->pri;
-#if COROUTINE_ONLY_SHARED_STACK
-    bool isSharedStack = true;
-#else
-    bool isSharedStack = attr == nullptr ? false : attr->isSharedStack;
-#endif
-    uint32_t stack_size = 0;
-    if (isSharedStack) {
-        stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 512 字节栈空间
-        if (stack_size == 0) stack_size = 512;
-    } else {
-        stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 4KB 栈空间
-        if (stack_size == 0)
-            stack_size = C_Static.def_stack_size;
-    }
-    if (Inter.thread_count == 1) {
+    CO_Thread *coroutine  = nullptr;
+    int        co_idx     = attr == nullptr ? -1 : attr->co_idx;
+    uint8_t    pri        = attr == nullptr ? TASK_PRI_NORMAL : attr->pri;
+    uint32_t   stack_size = attr == nullptr ? 0 / sizeof(STACK_TYPE) : attr->stack_size;   // 默认 4KB 栈空间
+    if (stack_size == 0)
+        stack_size = C_Static.def_stack_size;
+
+    if (Inter.thread_count == 1)
         coroutine = C_Static.coroutines[0];
-    } else if (isSharedStack || co_idx >= 0) {
-        if (co_idx < 0) {
-            // 寻址负载小的线程分配
-            uint32_t run_load = UINT32_MAX;   // 运行负载
-            uint32_t run_num  = UINT32_MAX;   // 运行数量
-            uint64_t now      = Inter.GetMillisecond();
-            int      n        = rand() % Inter.thread_count;
-            CO_EnterCriticalSection();
-            // 随机起始
-            CM_NodeLinkList_t list = C_Static.threads;
-            for (int i = 0; i < n; i++)
-                CM_NodeLink_Next(list);
-            CM_NodeLink_Foreach_Positive(CO_Thread, link, list, p)
-            {
-                uint64_t tv = now - p->start_time;
-                if (tv == 0) tv = 1;
-                uint32_t load = p->run_time * 1000 / tv;
-                if (load < run_load || (load == run_load && p->task_count < run_num)) {
-                    run_load  = load;
-                    run_num   = p->task_count;
-                    coroutine = p;
-                }
-            }
-            CO_LeaveCriticalSection();
-        } else
-            coroutine = GetCurrentThread(co_idx);
-    }
-    return AddTask(coroutine, func, pars, pri, name, stack_size, isSharedStack);
+    else if (co_idx >= 0)
+        coroutine = GetCurrentThread(co_idx);
+    return AddTask(coroutine, func, pars, pri, name, stack_size);
 }
 
 /**
@@ -1183,7 +1054,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
                 task->timeout    = 0;
                 AddTaskList(task, task->priority);
                 data  = nullptr;
-                co_id = task->isSharedStack ? task->coroutine->co_id : GetSleepThread()->co_id;
+                co_id = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
                 break;
             }
             p = p->next;
@@ -1343,8 +1214,7 @@ static int _PrintInfoTask(char *   buf,
             break;
         idx += co_snprintf(buf + idx,
                            max_size - idx,
-                           "  %c%c   ",
-                           p->isSharedStack ? 'S' : 'M',
+                           "   %c   ",
                            p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W'
                                                                                                                                             : 'S');
         if (idx >= max_size)
@@ -1610,7 +1480,7 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
         task->execv_time = 0;
         task->timeout    = 0;
         // 独立栈从正在休眠的线程中唤醒
-        uint16_t co_id = task->isSharedStack ? task->coroutine->co_id : GetSleepThread()->co_id;
+        uint16_t co_id = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
         // 加入运行列表
         AddTaskList(task, task->priority);
         CO_LeaveCriticalSection();
@@ -1822,7 +1692,7 @@ static void UnlockMutex(Coroutine_Mutex mutex)
                 if (mutex->max_wait_time < tv)
                     mutex->max_wait_time = tv;
                 isWait = true;
-                co_id  = task->isSharedStack ? task->coroutine->co_id : GetSleepThread()->co_id;
+                co_id  = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
             }
         }
     }
@@ -1888,9 +1758,6 @@ static void SetInter(const Coroutine_Inter *inter)
         C_Static.coroutines[i]        = Coroutine_Create((size_t)-1);
         C_Static.coroutines[i]->co_id = i;
     }
-    // 创建任务映射表
-    C_Static.tasks_map = (volatile CO_TCB **)Inter.Malloc(inter->thread_count * sizeof(CO_TCB *), __FILE__, __LINE__);
-    memset((CO_TCB **)C_Static.tasks_map, 0, inter->thread_count * sizeof(CO_TCB *));
     // 默认堆栈大小
     C_Static.def_stack_size = coroutine_get_stack_default_size();
     return;

@@ -100,7 +100,7 @@ static bool   is_sem_sleep[MAX_THREADS];
 static Coroutine_Events events = {
     nullptr,
     [](void *object) -> void {
-        SwitchToThread();
+        // SwitchToThread();
         return;
     },
     nullptr,

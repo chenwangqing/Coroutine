@@ -33,7 +33,7 @@ void Task1(void *obj)
         // Coroutine.FeedDog(30 * 1000);
         PrintMemory();
         std::string str = "hello";
-        int         ms  = (rand() % 750) + 250;
+        int         ms  = (rand() % 550) + 250;
         uint64_t    ts  = Task1_func1(ms);
         str += std::to_string(i);
         printf("[%llu][1][%llu/%d]i = %d %s\n", Coroutine.GetMillisecond(), ts, ms, i++, str.c_str());
@@ -58,7 +58,7 @@ void Task2(void *obj)
     while (true) {
         Coroutine.FeedDog(30 * 1000);
         std::string str = "hello";
-        int         ms  = (rand() % 250) + 250;
+        int         ms  = (rand() % 150) + 250;
         uint64_t    ts  = Coroutine.GetMillisecond();
         Coroutine.YieldDelay(ms);
         ts = Coroutine.GetMillisecond() - ts;
@@ -170,6 +170,45 @@ void Task6(void *obj)
     return;
 }
 
+volatile uint64_t g_count  = 0;
+volatile uint64_t g_count2 = 0;
+
+static void Task7(void *obj)
+{
+    while (true) {
+        g_count++;
+        Coroutine.Yield();
+    }
+    return;
+}
+
+DWORD WINAPI ThreadProc_test2(LPVOID lpParam)
+{
+    uint64_t last_count  = 0;
+    uint64_t last_count2 = 0;
+    while (true) {
+        Sleep(1000);
+        uint64_t t = g_count, a = g_count2;
+        uint64_t tv = t - last_count, tv2 = a - last_count2;
+        last_count  = t;
+        last_count2 = a;
+        printf("[%llu][7]count = %llu(%llu) %llu(%llu)\n",
+               Coroutine.GetMillisecond(),
+               tv,
+               t,
+               tv2,
+               a);
+    }
+}
+
+DWORD WINAPI ThreadProc_test(LPVOID lpParam)
+{
+    while (true) {
+        g_count2++;
+        Sleep(0);
+    }
+}
+
 DWORD WINAPI ThreadProc(LPVOID lpParam)
 {
     while (true)
@@ -203,7 +242,6 @@ int main()
     atr.co_idx        = -1;
     atr.stack_size    = 1024 * 16;
     atr.pri           = TASK_PRI_NORMAL;
-    atr.isSharedStack = false;
 
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task1, nullptr, "Task1", &atr);
@@ -212,15 +250,16 @@ int main()
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
     Sleep(rand() % 1000);
-
-    /*atr.isSharedStack = true;
-    atr.stack_size = 0;*/
     Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task5, &num, "Task5-1", &atr);
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task6, &num, "Task5-2", &atr);
 
+    Coroutine.AddTask(Task7, nullptr, "Task7", &atr);
+
+    //  CreateThread(NULL, 0, ThreadProc_test, NULL, 0, NULL);
+    CreateThread(NULL, 0, ThreadProc_test2, NULL, 0, NULL);
     while (true) {
         Sleep(100);
     }

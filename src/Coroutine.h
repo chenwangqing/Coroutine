@@ -2,7 +2,7 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.17
+ * @version  1.18
  * @date     2022-08-15
  *
  * @copyright Copyright (c) 2022  Four-Faith
@@ -28,6 +28,7 @@
  * <tr><td>2024-07-01 <td>1.15    <td>CXS    <td>添加看门狗；添加优先级
  * <tr><td>2024-07-03 <td>1.16    <td>CXS    <td>添加独立栈
  * <tr><td>2024-07-04 <td>1.17    <td>CXS    <td>独立栈动态分配线程运行
+ * <tr><td>2024-07-05 <td>1.18    <td>CXS    <td>删除共享栈，独立栈切换速度快更加实用
  * </table>
  *
  * @note
@@ -63,10 +64,6 @@ while (true)
 extern "C" {
 #endif
 
-// 仅共享栈协程
-#ifndef COROUTINE_ONLY_SHARED_STACK
-#define COROUTINE_ONLY_SHARED_STACK 0
-#endif
 // 任务调度时进行栈检查，会增加调度时间开销但能及时发现栈溢出的错误，适用于开发阶段
 #ifndef COROUTINE_CHECK_STACK
 #define COROUTINE_CHECK_STACK 0
@@ -75,13 +72,6 @@ extern "C" {
 // -------------- 独立栈协程 --------------
 // 优点：切换速度快
 // 缺点：占用内存大，容易造成栈溢出，某个任务都需要分配较大的栈空间
-// -------------- 共享栈协程 --------------
-// 优点：占用内存小，无需编写汇编代码进行适配
-// 缺点：1. 每次切换会保存栈上变量，切换速度慢。
-//      2. 共享栈会导致栈上变量的混乱（局部变量跨任务使用），容易造成数据错误
-// !!!!!!!!!!!!! 共享栈 --- 注意 !!!!!!!!!!!!!
-// ! 1. 禁止将局部变量跨任务使用，因为是共享栈，切换不同任务就会改变栈上的内容
-// ! 2. 不要在栈上分配一个很大的局部变量，这个会导致任务切换时间变长
 
 typedef struct _CO_Thread *   Coroutine_Handle;      // 协程实例
 typedef struct _CO_TCB *      Coroutine_TaskId;      // 任务id
@@ -200,10 +190,9 @@ typedef struct _C_MailData
  */
 typedef struct
 {
-    int      co_idx;          // 绑定协程索引 小于SetInter设置的线程数量 -1: 随机分配 默认：-1
-    uint8_t  pri;             // 优先级  TASK_PRI_LOWEST ~ TASK_PRI_HIGHEST 默认：TASK_PRI_NORMAL
-    bool     isSharedStack;   // 是否共享栈 默认：false
-    uint32_t stack_size;      // 栈大小 字节 0：使用默认 共享栈默认：512 独立栈默认：根据实际平台分配 共享栈会自动根据使用情况分配
+    int      co_idx;       // 绑定协程索引 小于SetInter设置的线程数量 -1: 随机分配 默认：-1
+    uint8_t  pri;          // 优先级  TASK_PRI_LOWEST ~ TASK_PRI_HIGHEST 默认：TASK_PRI_NORMAL
+    uint32_t stack_size;   // 栈大小 字节 0：使用默认 根据实际平台分配
 } Coroutine_TaskAttribute;
 
 typedef struct

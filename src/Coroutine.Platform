@@ -16,8 +16,6 @@
 #include <stdint.h>
 #include "Coroutine.h"
 
-#if !COROUTINE_ONLY_SHARED_STACK
-
 /**
  * @brief    支持动态分配运行的线程
  * @return   true           可以在多个线程上运行（非同时运行）
@@ -121,4 +119,3 @@ void coroutine_enter_task(void *func, void *arg, int *stack)
 #error "Coroutine.Platform: Unsupported platform!"
 #endif
 // clang-format on
-#endif   // !COROUTINE_SHARED_STACK
