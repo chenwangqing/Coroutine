@@ -16,9 +16,11 @@
 #include <WS2tcpip.h>
 #include <processthreadsapi.h>
 
+#define EN_ATOMIC 1
+
 static CRITICAL_SECTION critical_section;
 static CRITICAL_SECTION memory_critical_section;
-
+static LONG volatile lock_critical_section = 0;
 struct
 {
     int64_t used;
@@ -27,13 +29,22 @@ struct
 
 static void _Lock(const char *file, int line)
 {
+#if EN_ATOMIC
+    while (InterlockedIncrement(&lock_critical_section) != 1)
+        InterlockedDecrement(&lock_critical_section);
+#else
     EnterCriticalSection(&critical_section);
+#endif
     return;
 }
 
 static void _Unlock(const char *file, int line)
 {
+#if EN_ATOMIC
+    InterlockedDecrement(&lock_critical_section);
+#else
     LeaveCriticalSection(&critical_section);
+#endif
     return;
 }
 

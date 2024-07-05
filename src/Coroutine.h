@@ -507,6 +507,13 @@ typedef struct
      * @date     2024-07-01
      */
     void (*FeedDog)(uint32_t timeout);
+
+    /**
+     * @brief    设置默认堆栈大小
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-05
+     */
+    void (*SetDefaultStackSize)(uint32_t size);
 } _Coroutine;
 
 /**
