@@ -10,7 +10,8 @@ typedef uint32_t jmp_buf[6];
 
 typedef int STACK_TYPE;   // 栈类型
 
-#define STACK_SENTRY 0x5A5A5A5A   // 栈哨兵
+#define STACK_SENTRY_START 0x5A5A5A5A   // 栈哨兵
+#define STACK_SENTRY_END   0xA5A5A5A5   // 栈哨兵
 
 #define MAX_PRIORITY_NUM 5   // 最大优先级数
 
@@ -279,9 +280,9 @@ volatile static func_setjmp_t _c_setjmp = setjmp;
     }
 
 // 检查栈哨兵
-#define CHECK_STACK_SENTRY(n)                                                          \
-    if (n->stack[0] != STACK_SENTRY || n->stack[n->stack_alloc - 1] != STACK_SENTRY) { \
-        ERROR_STACK(n);                                                                \
+#define CHECK_STACK_SENTRY(n)                                                                    \
+    if (n->stack[0] != STACK_SENTRY_END || n->stack[n->stack_alloc - 1] != STACK_SENTRY_START) { \
+        ERROR_STACK(n);                                                                          \
     }
 
 /**
@@ -819,7 +820,8 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
     // 初始化栈空间
     memset(n->stack, 0xEE, n->stack_alloc * sizeof(STACK_TYPE));
     // 设置哨兵
-    n->stack[0] = n->stack[n->stack_alloc - 1] = STACK_SENTRY;
+    n->stack[0]                  = STACK_SENTRY_END;
+    n->stack[n->stack_alloc - 1] = STACK_SENTRY_START;
     // 添加到任务列表
     CO_EnterCriticalSection();
     AddTaskList(n, n->priority);

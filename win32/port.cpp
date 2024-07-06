@@ -16,7 +16,7 @@
 #include <WS2tcpip.h>
 #include <processthreadsapi.h>
 
-#define EN_ATOMIC 1
+#define EN_ATOMIC 0
 
 static CRITICAL_SECTION critical_section;
 static CRITICAL_SECTION memory_critical_section;
@@ -92,7 +92,7 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
     }
 }
 
-#define MAX_THREADS 1
+#define MAX_THREADS 3
 
 static HANDLE sem_sleep[MAX_THREADS];
 static bool   is_sem_sleep[MAX_THREADS];

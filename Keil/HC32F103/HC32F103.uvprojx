@@ -566,6 +566,11 @@
               <FileType>5</FileType>
               <FilePath>..\..\src\Universal.h</FilePath>
             </File>
+            <File>
+              <FileName>RBTree.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\src\RBTree.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>
