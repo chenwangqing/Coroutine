@@ -55,12 +55,15 @@ void Task2(void *obj)
         uint64_t ts = Coroutine.GetMillisecond();
         Coroutine.YieldDelay(ms);
         ts = Coroutine.GetMillisecond() - ts;
-        snprintf(str + s, sizeof(str) - s, "%d", i);
-        Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str, strlen(str), 1000);
+        s += snprintf(str + s, sizeof(str) - s, "%d", i);
         LOG_DEBUG("[2][%llu/%d]i = %d %s", ts, ms, i++, str);
+
         Coroutine.GiveSemaphore(sem1, 1);
-        if (!Coroutine.SendMail(mail1, data))
-            Coroutine.DeleteMessage(data);
+
+        char *buf = (char *)Coroutine.Malloc(s + 1, __FILE__, __LINE__);
+        memcpy(buf, str, s + 1);
+        if (!Coroutine.SendMail(mail1, i & 0xFF, (uint64_t)buf, s + 1, 1000))
+            Coroutine.Free(buf, __FILE__, __LINE__);
     }
     // return;
 }
@@ -101,13 +104,14 @@ void Task4(void *obj)
         Coroutine.FeedDog(30 * 1000);
         int ms = (rand() % 250) + 250;
         Coroutine.YieldDelay(ms);
-        Coroutine_MailData *data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
-        if (data == NULL) continue;
-        LOG_DEBUG("[4]mail1 recv: %llu %.*s",
-                  data->eventId,
-                  data->size,
-                  (char *)data->data);
-        Coroutine.DeleteMessage(data);
+        Coroutine_MailResult data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
+        if (!data.isOk || data.size == 0) continue;
+        LOG_DEBUG("[%llu][4]mail1 recv: %llu %.*s",
+                  Coroutine.GetMillisecond(),
+                  data.id,
+                  data.size,
+                  (char *)(uint32_t)data.data);
+        Coroutine.Free((void *)(uint32_t)data.data, __FILE__, __LINE__);
     }
     //    return;
 }

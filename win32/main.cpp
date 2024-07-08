@@ -38,9 +38,10 @@ void Task1(void *obj)
         str += std::to_string(i);
         printf("[%llu][1][%llu/%d]i = %d %s\n", Coroutine.GetMillisecond(), ts, ms, i++, str.c_str());
 #if 01
-        Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str.c_str(), str.size(), 1000);
-        if (!Coroutine.SendMail(mail1, data))
-            Coroutine.DeleteMessage(data);
+        char *buf = (char *)Coroutine.Malloc(str.size() + 1, __FILE__, __LINE__);
+        memcpy(buf, str.c_str(), str.size() + 1);
+        if (!Coroutine.SendMail(mail1, i & 0xFF, (uint64_t)buf, str.size() + 1,1000))
+            Coroutine.Free(buf, __FILE__, __LINE__);
 #endif
 #if EN_SLEEP
         Sleep(10);
@@ -114,13 +115,13 @@ void Task4(void *obj)
         int ms = (rand() % 250) + 250;
         Coroutine.YieldDelay(ms);
         auto data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
-        if (data == NULL) continue;
+        if (!data.isOk || data.size == 0) continue;
         printf("[%llu][4]mail1 recv: %llu %.*s\n",
                Coroutine.GetMillisecond(),
-               data->eventId,
-               data->size,
-               (char *)data->data);
-        Coroutine.DeleteMessage(data);
+               data.id,
+               data.size,
+               (char *)data.data);
+        Coroutine.Free((void *)data.data, __FILE__, __LINE__);
 #if EN_SLEEP
         Sleep(2);
 #endif
@@ -239,9 +240,9 @@ int main()
 
     Coroutine_TaskAttribute atr;
     memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
-    atr.co_idx        = -1;
-    atr.stack_size    = 1024 * 16;
-    atr.pri           = TASK_PRI_NORMAL;
+    atr.co_idx     = -1;
+    atr.stack_size = 1024 * 16;
+    atr.pri        = TASK_PRI_NORMAL;
 
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task1, nullptr, "Task1", &atr);

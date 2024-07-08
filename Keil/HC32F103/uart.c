@@ -341,16 +341,10 @@ int UART_Write(size_t fd, const void *data, int len)
     DMA_Cmd(DMA1, cfg->dma_tx, ENABLE);
     __enable_irq();
 #else
-
-    uint64_t ts = GetMilliseconds();
-    while (cfg->tx->size && GetMilliseconds() - ts <= 1000)
-        ;
-    if (cfg->tx->size)
-        return 0;
     extern void CriticalSection(bool en);
 
     uint8_t *p = (uint8_t *)data;
-    ts         = GetMilliseconds();
+    uint64_t ts         = GetMilliseconds();
     CriticalSection(true);
     cfg->tx->buff = p + 1;
     cfg->tx->size = len - 1;
@@ -363,15 +357,6 @@ int UART_Write(size_t fd, const void *data, int len)
     cfg->tx->size = 0;
     cfg->tx->buff = NULL;
     CriticalSection(false);
-    // uint64_t ts      = GetMilliseconds();
-    // for (int i = 0; i < len; i++) {
-    //     USART_SendData(cfg->interface, p[i]);
-    //     while (!USART_GetFlagStatus(cfg->interface, USART_FLAG_TC)) {
-    //         if ((GetMilliseconds() - ts) >= 500)
-    //             return len;
-    //     }
-    //     ts = GetMilliseconds();
-    // }
 #endif
     return len;
 }

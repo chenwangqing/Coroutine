@@ -104,6 +104,20 @@ struct _SemaphoreNode
 };
 
 /**
+ * @brief    邮件数据
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2022-08-16
+ */
+typedef struct _C_MailData
+{
+    uint64_t      expiration_time;   // 过期时间
+    uint64_t      eventId;           // 事件id
+    uint64_t      data;              // 邮件数据
+    uint32_t      size;              // 邮件大小
+    CM_NodeLink_t link;              // _C_MailData
+} Coroutine_MailData;
+
+/**
  * @brief    信号节点
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2022-08-17
@@ -929,21 +943,15 @@ static uint32_t Coroutine_YieldTimeOut(uint32_t timeout)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2022-08-16
  */
-static Coroutine_MailData *MakeMessage(uint64_t    eventId,
-                                       const void *data,
-                                       size_t      size,
-                                       uint32_t    time)
+static Coroutine_MailData *MakeMessage(uint64_t eventId,
+                                       uint64_t data,
+                                       uint32_t size,
+                                       uint32_t time)
 {
-    size_t mlen             = size + sizeof(Coroutine_MailData);
-    mlen                    = ALIGN(mlen, 64) << 6;   // 64B对齐
-    Coroutine_MailData *dat = (Coroutine_MailData *)Inter.Malloc(mlen, __FILE__, __LINE__);
+    Coroutine_MailData *dat = (Coroutine_MailData *)Inter.Malloc(sizeof(Coroutine_MailData), __FILE__, __LINE__);
     if (dat == nullptr)
         return nullptr;
-    dat->data = (char *)(dat + 1);
-    if (data != nullptr)
-        memcpy(dat->data, data, size);
-    else
-        memset(dat->data, 0, size);
+    dat->data            = data;
     dat->size            = size;
     dat->eventId         = eventId;
     dat->expiration_time = Inter.GetMillisecond() + time;
@@ -1001,21 +1009,25 @@ static void DeleteMailbox(Coroutine_Mailbox mb)
     return;
 }
 
-static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
+static bool SendMail(Coroutine_Mailbox mb,
+                     uint64_t          id,
+                     uint64_t          data,
+                     uint32_t          size,
+                     uint32_t          timeout)
 {
-    if (mb == nullptr || data == nullptr)
+    if (mb == nullptr)
         return false;
     CO_EnterCriticalSection();
     mb->mail_count++;
-    if (mb->size < data->size + sizeof(Coroutine_MailData)) {
+    if (mb->size < size + sizeof(Coroutine_MailData)) {
         // 检查邮箱，是否有过期邮件
         uint64_t       now = Inter.GetMillisecond();
         CM_NodeLink_t *p   = CM_NodeLink_First(mb->mails);
-        while (p != nullptr && mb->size < data->size + sizeof(Coroutine_MailData)) {
+        while (p != nullptr && mb->size < size) {
             Coroutine_MailData *md = CM_Field_ToType(Coroutine_MailData, link, p);
             if (md->expiration_time <= now) {
                 // 删除过期
-                mb->size += md->size + sizeof(Coroutine_MailData);
+                mb->size += md->size;
                 mb->mail_count--;
                 p = CM_NodeLink_Remove(&mb->mails, &md->link);
                 DeleteMessage(md);
@@ -1027,26 +1039,31 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
             if (p == mb->mails)
                 break;
         }
-        if (mb->size < data->size + sizeof(Coroutine_MailData)) {
+        if (mb->size < size) {
             CO_LeaveCriticalSection();
             return false;
         }
     }
-    mb->size -= data->size + sizeof(Coroutine_MailData);
+    Coroutine_MailData *dat = MakeMessage(id, data, size, timeout);
+    if (dat == nullptr) {
+        CO_LeaveCriticalSection();
+        return false;
+    }
+    mb->size -= size;
     uint16_t co_id = 0;
     // 检查等待列表
     if (!CM_NodeLink_IsEmpty(mb->waits)) {
         CM_NodeLink_t *p = CM_NodeLink_First(mb->waits);
         while (true) {
             MailWaitNode *n = CM_Field_ToType(MailWaitNode, link, p);
-            if (n->id_mask & data->eventId) {
-                n->data = data;
+            if (n->id_mask & id) {
+                n->data = dat;
                 // 开始执行
                 CO_TCB *task     = (CO_TCB *)n->task;
                 task->execv_time = 0;
                 task->timeout    = 0;
                 AddTaskList(task, task->priority);
-                data  = nullptr;
+                dat   = nullptr;
                 co_id = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
                 break;
             }
@@ -1055,7 +1072,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
                 break;
         }
     }
-    if (data == nullptr) {
+    if (dat == nullptr) {
         CO_LeaveCriticalSection();
         // 唤醒
         if (Inter.events->wake != nullptr)
@@ -1063,7 +1080,7 @@ static bool SendMail(Coroutine_Mailbox mb, Coroutine_MailData *data)
         return true;
     }
     // 加入消息列表
-    CM_NodeLink_Insert(&mb->mails, CM_NodeLink_End(mb->mails), &data->link);
+    CM_NodeLink_Insert(&mb->mails, CM_NodeLink_End(mb->mails), &dat->link);
     CO_LeaveCriticalSection();
     return true;
 }
@@ -1082,10 +1099,10 @@ static Coroutine_MailData *GetMail(Coroutine_Mailbox mb,
                 // 超时
                 Coroutine_MailData *t = md;
                 p                     = CM_NodeLink_Remove(&mb->mails, &t->link);
-                mb->size += t->size + sizeof(Coroutine_MailData);
+                mb->size += t->size;
                 mb->mail_count--;
                 DeleteMessage(t);
-                if (p == CM_NodeLink_First(mb->mails))
+                if (CM_NodeLink_IsEmpty(mb->mails))
                     break;
                 continue;
             }
@@ -1100,30 +1117,31 @@ static Coroutine_MailData *GetMail(Coroutine_Mailbox mb,
         }
     }
     if (ret) {
-        mb->size += ret->size + sizeof(Coroutine_MailData);
+        mb->size += ret->size;
         mb->mail_count--;
     }
     return ret;
 }
 
-static Coroutine_MailData *ReceiveMail(Coroutine_Mailbox mb,
-                                       uint64_t          eventId_Mask,
-                                       uint32_t          timeout)
+static Coroutine_MailResult ReceiveMail(Coroutine_Mailbox mb,
+                                        uint64_t          eventId_Mask,
+                                        uint32_t          timeout)
 {
+    Coroutine_MailResult ret;
+    CM_ZERO(&ret);
     CO_Thread *c = GetCurrentThread(-1);
     if (c == nullptr || c->idx_task == nullptr || mb == nullptr)
-        return nullptr;
-    CO_TCB *task = c->idx_task;
-    CO_EnterCriticalSection();
-    Coroutine_MailData *ret = GetMail(mb, eventId_Mask);
-    if (ret) {
-        CO_LeaveCriticalSection();
-        _Yield(c, 0);
         return ret;
+    CO_TCB *      task = c->idx_task;
+    MailWaitNode *n    = nullptr;
+    CO_EnterCriticalSection();
+    Coroutine_MailData *dat = GetMail(mb, eventId_Mask);
+    if (dat) {
+        goto END;
     }
     // 加入等待列表
     task->isWaitMail = 1;   // 设置等待标志
-    MailWaitNode *n  = &task->wait_mail;
+    n                = &task->wait_mail;
     n->id_mask       = eventId_Mask;
     n->task          = task;
     n->data          = nullptr;
@@ -1136,15 +1154,23 @@ static Coroutine_MailData *ReceiveMail(Coroutine_Mailbox mb,
     // 取出消息
     CO_EnterCriticalSection();
     if (n->data) {
-        ret     = n->data;
+        dat     = n->data;
         n->data = nullptr;
-        mb->size += ret->size + sizeof(Coroutine_MailData);
+        mb->size += dat->size;
         mb->mail_count--;
     }
     CM_NodeLink_Remove(&mb->waits, &n->link);
     task->isWaitMail = 0;   // 清除等待标志
     mb->wait_count--;
+END:
     CO_LeaveCriticalSection();
+    if (dat) {
+        ret.data = dat->data;
+        ret.size = dat->size;
+        ret.id   = dat->eventId;
+        ret.isOk = true;
+        DeleteMessage(dat);
+    }
     return ret;
 }
 #endif
@@ -2041,8 +2067,6 @@ const _Coroutine Coroutine = {
     Coroutine_YieldTimeOut,
     Coroutine_RunTick,
 #if COROUTINE_ENABLE_MAILBOX
-    MakeMessage,
-    DeleteMessage,
     CreateMailbox,
     DeleteMailbox,
     SendMail,

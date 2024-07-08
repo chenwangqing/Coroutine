@@ -29,7 +29,7 @@
  * <tr><td>2024-07-03 <td>1.16    <td>CXS    <td>添加独立栈
  * <tr><td>2024-07-04 <td>1.17    <td>CXS    <td>独立栈动态分配线程运行
  * <tr><td>2024-07-05 <td>1.18    <td>CXS    <td>删除共享栈，独立栈切换速度快更加实用;添加红黑树用于休眠列表
- * <tr><td>2024-07-05 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪
+ * <tr><td>2024-07-08 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪
  * </table>
  *
  * @note
@@ -143,25 +143,25 @@ typedef struct
     size_t thread_count;   // 线程数量
 
     /**
-    * @brief    进入临界保护
-    * @author   CXS (chenxiangshu@outlook.com)
-    * @date     2024-06-26
-    */
+     * @brief    进入临界保护
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-26
+     */
     void (*EnterCriticalSection)(const char *file, int line);
 
     /**
-    * @brief    推出临界保护
-    * @author   CXS (chenxiangshu@outlook.com)
-    * @date     2024-06-26
-    */
+     * @brief    推出临界保护
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-26
+     */
     void (*LeaveCriticalSection)(const char *file, int line);
 
     /**
-    * @brief    内存分配
-    * @param    size           内存分配大小，字节
-    * @author   CXS (chenxiangshu@outlook.com)
-    * @date     2024-06-26
-    */
+     * @brief    内存分配
+     * @param    size           内存分配大小，字节
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-26
+     */
     void *(*Malloc)(size_t size, const char *file, int line);
 
     /**
@@ -173,10 +173,10 @@ typedef struct
     void (*Free)(void *ptr, const char *file, int line);
 
     /**
-    * @brief    获取运行毫秒值
-    * @author   CXS (chenxiangshu@outlook.com)
-    * @date     2024-06-26
-    */
+     * @brief    获取运行毫秒值
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-26
+     */
     uint64_t (*GetMillisecond)(void);
 
     /**
@@ -194,19 +194,13 @@ typedef struct
     Coroutine_Events *events;
 } Coroutine_Inter;
 
-/**
- * @brief    邮件数据
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-16
- */
-typedef struct _C_MailData
+typedef struct
 {
-    uint64_t      expiration_time;   // 过期时间
-    uint64_t      eventId;           // 事件id
-    size_t        size;              // 消息长度
-    void *        data;              // 消息数据
-    CM_NodeLink_t link;              // _C_MailData
-} Coroutine_MailData;
+    uint64_t id;     // 邮件大小
+    uint64_t data;   // 邮件数据
+    uint32_t size;   // 邮件长度
+    bool     isOk;   // 获取成功
+} Coroutine_MailResult;
 
 /**
  * @brief    任务属性
@@ -231,26 +225,26 @@ typedef struct
     void (*SetInter)(const Coroutine_Inter *inter);
 
     /**
-   * @brief    添加协程任务
-   * @param    func           执行函数
-   * @param    pars           执行参数
-   * @param    name           协程名称
-   * @param    attr           任务属性 nullptr:默认属性
-   * @return   int            协程id NULL：创建失败
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-15
-   */
+     * @brief    添加协程任务
+     * @param    func           执行函数
+     * @param    pars           执行参数
+     * @param    name           协程名称
+     * @param    attr           任务属性 nullptr:默认属性
+     * @return   int            协程id NULL：创建失败
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2022-08-15
+     */
     Coroutine_TaskId (*AddTask)(Coroutine_Task                 func,
                                 void *                         pars,
                                 const char *                   name,
                                 const Coroutine_TaskAttribute *attr);
 
     /**
-   * @brief    获取当前任务id
-   * @return   Coroutine_TaskId
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-16
-   */
+     * @brief    获取当前任务id
+     * @return   Coroutine_TaskId
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2022-08-16
+     */
     Coroutine_TaskId (*GetCurrentTaskId)(void);
 
     /**
@@ -268,21 +262,21 @@ typedef struct
     size_t (*GetThreadId)(uint16_t co_id);
 
     /**
-   * @brief    【内部使用】转交控制权
-   * @param    coroutine      线程实例
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-15
-   */
+     * @brief    【内部使用】转交控制权
+     * @param    coroutine      线程实例
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2022-08-15
+     */
     void (*Yield)(void);
 
     /**
-   * @brief    【内部使用】转交控制权
-   * @param    coroutine      线程实例
-   * @param    timeout        超时 0：不超时
-   * @return   uint32_t       多耗时的部分
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-15
-   */
+     * @brief    【内部使用】转交控制权
+     * @param    coroutine      线程实例
+     * @param    timeout        超时 0：不超时
+     * @return   uint32_t       多耗时的部分
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2022-08-15
+     */
     uint32_t (*YieldDelay)(uint32_t timeout);
 
     /**
@@ -295,26 +289,6 @@ typedef struct
     bool (*RunTick)(void);
 
 #if COROUTINE_ENABLE_MAILBOX
-    /**
-   * @brief    制作消息
-   * @param    eventId        事件id
-   * @param    data           消息数据
-   * @param    size           数据长度
-   * @param    time           有效时间
-   * @return   MsgData*
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-16
-   */
-    Coroutine_MailData *(*MakeMessage)(uint64_t eventId, const void *data, size_t size, uint32_t time);
-
-    /**
-   * @brief   删除消息(发送失败需要删除消息)
-   * @param    dat            消息数据
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-08-16
-   */
-    void (*DeleteMessage)(Coroutine_MailData *dat);
-
     /**
      * @brief    创建邮箱
      * @param    name                邮箱名称 最大31字节
@@ -332,25 +306,32 @@ typedef struct
     void (*DeleteMailbox)(Coroutine_Mailbox mb);
 
     /**
-    * @brief    发送邮件
-    * @param    mb             邮箱
-    * @param    data           邮件消息
-    * @author   CXS (chenxiangshu@outlook.com)
-    * @date     2024-06-26
-    */
-    bool (*SendMail)(Coroutine_Mailbox mb, Coroutine_MailData *data);
+     * @brief    发送邮件
+     * @param    mb             邮箱
+     * @param    id             邮件id
+     * @param    data           邮件消息
+     * @param    size           邮件信息长度
+     * @param    timeout        邮件超时
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-26
+     */
+    bool (*SendMail)(Coroutine_Mailbox mb,
+                     uint64_t          id,
+                     uint64_t          data,
+                     uint32_t          size,
+                     uint32_t          timeout);
 
     /**
-    * @brief    【内部使用】接收邮件
-    * @param    mb             邮箱
-    * @param    eventId_Mask   消息id掩码
-    * @param    timeout        接收超时
-    * @author   CXS (chenxiangshu@outlook.com)
-    * @date     2024-06-26
-    */
-    Coroutine_MailData *(*ReceiveMail)(Coroutine_Mailbox mb,
-                                       uint64_t          eventId_Mask,
-                                       uint32_t          timeout);
+     * @brief    【内部使用】接收邮件
+     * @param    mb             邮箱
+     * @param    id_Mask        邮件id掩码
+     * @param    timeout        接收超时
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-06-26
+     */
+    Coroutine_MailResult (*ReceiveMail)(Coroutine_Mailbox mb,
+                                        uint64_t          id_Mask,
+                                        uint32_t          timeout);
 #endif
 
 #if COROUTINE_ENABLE_PRINT_INFO
@@ -363,7 +344,7 @@ typedef struct
      *  SN   TaskId   Func    Pri                 Status Stack                Runtime       WaitTime   DogTime    Name
      * 序号  任务id   函数地址 当前优先级|初始优先级 状态 栈大小/栈最大/栈分配 运行时间(ms) 等待时间(ms) 看门狗时间(ms) 名称
      *   1 00C91124 007D115E  2|2                 MW   1128/1128/16384      14(51%)       58         29958      Task3
-     * Status：<M><S> 
+     * Status：<M><S>
      *        <M> M: 独立栈协程  S: 共享栈协程
      *        <S> R: 指针运行 S: 休眠 W: 等待
      * @author   CXS (chenxiangshu@outlook.com)
@@ -452,37 +433,37 @@ typedef struct
 #endif
 
     /**
-   * @brief    获取毫秒值
-   * @return   const Coroutine_Events*
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-09-19
-   */
+     * @brief    获取毫秒值
+     * @return   const Coroutine_Events*
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2022-09-19
+     */
     uint64_t (*GetMillisecond)(void);
 
     /**
-   * @brief    内存分配
-   * @return   const Coroutine_Events*
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-09-19
-   */
+     * @brief    内存分配
+     * @return   const Coroutine_Events*
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2022-09-19
+     */
     void *(*Malloc)(size_t      size,
                     const char *file,
                     int         line);
 
     /**
-   * @brief    内存释放
-   * @return   const Coroutine_Events*
-   * @author   CXS (chenxiangshu@outlook.com)
-   * @date     2022-09-19
-   */
+     * @brief    内存释放
+     * @return   const Coroutine_Events*
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2022-09-19
+     */
     void (*Free)(void *      ptr,
                  const char *file,
                  int         line);
 
     /**
      * @brief    获取任务名称
-     * @param    taskId         
-     * @return   const char*    
+     * @param    taskId
+     * @return   const char*
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-27
      */
