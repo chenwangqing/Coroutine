@@ -1,10 +1,5 @@
 
 #include "Coroutine.h"
-#ifdef WIN32
-typedef uint32_t jmp_buf[6];
-#else
-#include <setjmp.h>
-#endif
 #include "Coroutine.Platform.h"
 #include "RBTree.h"
 #include "NodeLink.h"
@@ -15,63 +10,6 @@ typedef int STACK_TYPE;   // 栈类型
 #define STACK_SENTRY_END   0xA5A5A5A5   // 栈哨兵
 
 #define MAX_PRIORITY_NUM 5   // 最大优先级数
-
-// --------------------------------------------------------------------------------------
-//                              |   跳转处理    |
-// --------------------------------------------------------------------------------------
-
-#ifdef WIN32
-// VC 编译器 longjmp 会析构C++ 对象，使用需要自己实现 setjmp / longjmp
-
-/**
- * @brief    保存跳转环境
- * @param    buf            环境
- * @return   int            跳转返回值
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-19
- */
-static int setjmp(jmp_buf buf)
-{
-    __asm {
-        mov eax, dword ptr[buf]
-        mov dword ptr[eax + 0], ebx   // 保存 ebx
-        mov dword ptr[eax + 4], esi   // 保存 esi
-        mov dword ptr[eax + 8], edi   // 保存 edi
-        mov ecx, ebp
-        add ecx, 8
-        mov dword ptr[eax + 12], ecx   // 保存 esp
-        mov ecx, dword ptr[ebp]
-        mov dword ptr[eax + 16], ecx   // 保存 edp
-        mov ecx, dword ptr[ebp + 4]   // 获取 调用 setjmp 下一个地址
-        mov dword ptr[eax + 20], ecx   // 保存 setjmp 下一个地址
-        mov eax, 0   // 默认返回 0
-    }
-}
-
-/**
- * @brief    执行跳转
- * @param    buf            环境
- * @param    val            跳转返回值
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2022-08-19
- */
-static void longjmp(jmp_buf buf, int val)
-{
-    __asm {
-        mov eax, dword ptr[val]
-        mov edi, dword ptr[buf]
-        mov esi, dword ptr[edi + 4]   // 保存 esi
-        mov esp, dword ptr[edi + 12]   // 保存 esp
-        mov ebp, dword ptr[edi + 16]   // 保存 edp
-        mov ecx, dword ptr[edi + 20]   // 保存 setjmp 下一个地址
-        mov ebx, dword ptr[edi + 0]   // 保存 ebx
-        mov edi, dword ptr[edi + 8]   // 保存 edi
-        jmp ecx
-    }
-    return;
-}
-
-#endif
 
 typedef int (*func_setjmp_t)(jmp_buf buf);
 typedef void (*func_longjmp_t)(jmp_buf buf, int val);
