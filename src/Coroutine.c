@@ -267,7 +267,9 @@ static struct
 #define CO_EnterCriticalSection() Inter.EnterCriticalSection(__FILE__, __LINE__)
 #define CO_LeaveCriticalSection() Inter.LeaveCriticalSection(__FILE__, __LINE__);
 
-static void                   DeleteMessage(Coroutine_MailData *dat);
+#if COROUTINE_ENABLE_SEMAPHORE
+static void DeleteMessage(Coroutine_MailData *dat);
+#endif
 static Coroutine_Handle       Coroutine_Create(size_t id);
 volatile static func_setjmp_t _c_setjmp = setjmp;
 
@@ -286,6 +288,7 @@ volatile static func_setjmp_t _c_setjmp = setjmp;
         ERROR_STACK(n);                                                                          \
     }
 
+#if COROUTINE_CHECK_STACK || COROUTINE_ENABLE_PRINT_INFO
 /**
  * @brief    检查任务栈
  * @param    t              
@@ -309,6 +312,7 @@ static void CheckStack(volatile CO_TCB *t)
     if (s > t->stack_max) t->stack_max = s;
     return;
 }
+#endif
 
 /**
  * @brief    删除任务
@@ -320,6 +324,7 @@ static void CheckStack(volatile CO_TCB *t)
 static void DeleteTask(CO_TCB *t)
 {
     // 释放消息列表
+#if COROUTINE_ENABLE_SEMAPHORE
     if (t->isWaitMail) {
         CM_NodeLink_Remove(&t->wait_mail.mailbox->waits, &t->wait_mail.link);
         t->isWaitMail = 0;
@@ -329,6 +334,7 @@ static void DeleteTask(CO_TCB *t)
             t->wait_mail.data = nullptr;
         }
     }
+#endif
     // 释放信号列表
     if (t->isWaitSem) {
         CM_NodeLink_Remove(&t->wait_sem.semaphore->list, &t->wait_sem.link);
@@ -912,6 +918,7 @@ static uint32_t Coroutine_YieldTimeOut(uint32_t timeout)
     return ts > timeout ? (uint32_t)ts - timeout : 0;   // 返回误差
 }
 
+#if COROUTINE_ENABLE_MAILBOX
 /**
  * @brief    制作消息
  * @param    eventId        事件id
@@ -1140,7 +1147,9 @@ static Coroutine_MailData *ReceiveMail(Coroutine_Mailbox mb,
     CO_LeaveCriticalSection();
     return ret;
 }
+#endif
 
+#if COROUTINE_ENABLE_PRINT_INFO
 static size_t co_snprintf(char *buf, size_t size, const char *fmt, ...)
 {
     if (buf == nullptr || size == 0)
@@ -1419,7 +1428,9 @@ static int PrintInfo(char *buf, int max_size)
 {
     return _PrintInfo(buf, max_size, true);
 }
+#endif
 
+#if COROUTINE_ENABLE_SEMAPHORE
 /**
  * @brief    创建信号量
  * @param    init_val       初始值
@@ -1576,7 +1587,9 @@ static bool WaitSemaphore(Coroutine_Semaphore _sem, uint32_t val, uint32_t timeo
     } while (!isOk && Inter.GetMillisecond() - now < timeout);
     return isOk;
 }
+#endif
 
+#if COROUTINE_ENABLE_MUTEX
 static Coroutine_Mutex CreateMutex(const char *name)
 {
     CO_Mutex *mutex = (CO_Mutex *)Inter.Malloc(sizeof(CO_Mutex), __FILE__, __LINE__);
@@ -1720,6 +1733,7 @@ static void UnlockMutex(Coroutine_Mutex mutex)
         Inter.events->wake(co_id, Inter.events->object);
     return;
 }
+#endif
 
 static int __tasks_sleep_cm_rbtree_callback_compare(const CM_RBTree_t *     tree,
                                                     const CM_RBTree_Link_t *new_val,
@@ -1811,6 +1825,7 @@ static const char *GetTaskName(Coroutine_TaskId taskId)
     return taskId == nullptr || taskId->name == nullptr ? "" : taskId->name;
 }
 
+#if COROUTINE_ENABLE_ASYNC
 static void _ASyncTask(void *obj)
 {
     Coroutine_ASync a = (Coroutine_ASync)obj;
@@ -1875,7 +1890,9 @@ static void *ASyncGetResultAndDelete(Coroutine_ASync async_ptr)
     Inter.Free(p, __FILE__, __LINE__);
     return ret;
 }
+#endif
 
+#if COROUTINE_ENABLE_WATCHDOG
 static void FeedDog(uint32_t time)
 {
     CO_Thread *c = GetCurrentThread(-1);
@@ -1901,12 +1918,14 @@ static void FeedDog(uint32_t time)
     CO_LeaveCriticalSection();
     return;
 }
+#endif
 
 static void SetDefaultStackSize(uint32_t size)
 {
     C_Static.def_stack_size = size;
 }
 
+#if COROUTINE_ENABLE_SEMAPHORE && COROUTINE_ENABLE_MUTEX && COROUTINE_ENABLE_ASYNC && COROUTINE_ENABLE_WATCHDOG
 static void Universal_DeleteLock(void *lock)
 {
     DeleteMutex((Coroutine_Mutex)lock);
@@ -1986,7 +2005,6 @@ static void Universal_DelayMs(uint32_t time)
     Coroutine_YieldTimeOut(time);
 }
 
-#if COROUTINE_ENABLE_SEMAPHORE && COROUTINE_ENABLE_MUTEX && COROUTINE_ENABLE_ASYNC && COROUTINE_ENABLE_WATCHDOG
 static const Universal *GetUniversal(void)
 {
     static const Universal universal = {
