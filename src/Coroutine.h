@@ -58,8 +58,8 @@ while (true)
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "NodeLink.h"
 #include "Universal.h"
+#include "Define.h"
 
 #ifdef __cplusplus
 extern "C" {

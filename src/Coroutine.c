@@ -7,6 +7,7 @@ typedef uint32_t jmp_buf[6];
 #endif
 #include "Coroutine.Platform.h"
 #include "RBTree.h"
+#include "NodeLink.h"
 
 typedef int STACK_TYPE;   // 栈类型
 
