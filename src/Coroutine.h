@@ -29,7 +29,7 @@
  * <tr><td>2024-07-03 <td>1.16    <td>CXS    <td>添加独立栈
  * <tr><td>2024-07-04 <td>1.17    <td>CXS    <td>独立栈动态分配线程运行
  * <tr><td>2024-07-05 <td>1.18    <td>CXS    <td>删除共享栈，独立栈切换速度快更加实用;添加红黑树用于休眠列表
- * <tr><td>2024-07-08 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪
+ * <tr><td>2024-07-08 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪；完善邮件通信
  * </table>
  *
  * @note
@@ -531,7 +531,6 @@ typedef struct
  * @date     2022-08-16
  */
 extern const _Coroutine Coroutine;
-
 #ifdef __cplusplus
 }
 #endif
