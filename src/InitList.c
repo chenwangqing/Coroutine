@@ -42,13 +42,10 @@ void CM_Init(void)
     _fix_order(true);
     CM_Init_Node_t *p = __cm_init_node_list;
     while (p != nullptr) {
-        if (p->order >= CM_INIT_ORDER_APPDATA)
-            LOG_PRINTF("[%04X]Module initialize: %s", p->order, p->name);   // 需要日志初始化完成
         if (p->init != nullptr)
             p->init(p->init_val);
         p = p->next;
     }
-    LOG_PRINTF("All modules are initialized!!!");
     return;
 }
 
