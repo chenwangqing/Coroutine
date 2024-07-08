@@ -2,7 +2,7 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.18
+ * @version  1.19
  * @date     2022-08-15
  *
  * @copyright Copyright (c) 2022  Four-Faith
@@ -29,6 +29,7 @@
  * <tr><td>2024-07-03 <td>1.16    <td>CXS    <td>添加独立栈
  * <tr><td>2024-07-04 <td>1.17    <td>CXS    <td>独立栈动态分配线程运行
  * <tr><td>2024-07-05 <td>1.18    <td>CXS    <td>删除共享栈，独立栈切换速度快更加实用;添加红黑树用于休眠列表
+ * <tr><td>2024-07-05 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪
  * </table>
  *
  * @note
@@ -67,6 +68,30 @@ extern "C" {
 // 任务调度时进行栈检查，会增加调度时间开销但能及时发现栈溢出的错误，适用于开发阶段
 #ifndef COROUTINE_CHECK_STACK
 #define COROUTINE_CHECK_STACK 0
+#endif
+// 启用邮箱
+#ifndef COROUTINE_ENABLE_MAILBOX
+#define COROUTINE_ENABLE_MAILBOX 1
+#endif
+// 启用信号量
+#ifndef COROUTINE_ENABLE_SEMAPHORE
+#define COROUTINE_ENABLE_SEMAPHORE 1
+#endif
+// 启用互斥锁
+#ifndef COROUTINE_ENABLE_MUTEX
+#define COROUTINE_ENABLE_MUTEX 1
+#endif
+// 启用异步任务
+#ifndef COROUTINE_ENABLE_ASYNC
+#define COROUTINE_ENABLE_ASYNC 1
+#endif
+// 启用看门狗
+#ifndef COROUTINE_ENABLE_WATCHDOG
+#define COROUTINE_ENABLE_WATCHDOG 1
+#endif
+// 启用打印信息
+#ifndef COROUTINE_ENABLE_PRINT_INFO
+#define COROUTINE_ENABLE_PRINT_INFO 1
 #endif
 
 // -------------- 独立栈协程 --------------
@@ -269,6 +294,7 @@ typedef struct
      */
     bool (*RunTick)(void);
 
+#if COROUTINE_ENABLE_MAILBOX
     /**
    * @brief    制作消息
    * @param    eventId        事件id
@@ -325,7 +351,9 @@ typedef struct
     Coroutine_MailData *(*ReceiveMail)(Coroutine_Mailbox mb,
                                        uint64_t          eventId_Mask,
                                        uint32_t          timeout);
+#endif
 
+#if COROUTINE_ENABLE_PRINT_INFO
     /**
      * @brief    显示协程信息
      * @param    buf            缓存
@@ -342,7 +370,9 @@ typedef struct
      * @date     2022-08-16
      */
     int (*PrintInfo)(char *buf, int max_size);
+#endif
 
+#if COROUTINE_ENABLE_SEMAPHORE
     /**
      * @brief    创建信号量
      * @param    name           名称 最大31字节
@@ -384,7 +414,9 @@ typedef struct
     bool (*WaitSemaphore)(Coroutine_Semaphore _sem,
                           uint32_t            val,
                           uint32_t            timeout);
+#endif
 
+#if COROUTINE_ENABLE_MUTEX
     /**
      * @brief    创建互斥锁
      * @param    name           名称 最大31字节
@@ -417,6 +449,7 @@ typedef struct
      * @date     2024-06-29
      */
     void (*UnlockMutex)(Coroutine_Mutex mutex);
+#endif
 
     /**
    * @brief    获取毫秒值
@@ -455,6 +488,7 @@ typedef struct
      */
     const char *(*GetTaskName)(Coroutine_TaskId taskId);
 
+#if COROUTINE_ENABLE_ASYNC
     /**
      * @brief    执行异步任务
      * @param    func           执行函数
@@ -481,14 +515,18 @@ typedef struct
      * @date     2024-06-28
      */
     void *(*AsyncGetResultAndDelete)(Coroutine_ASync async);
+#endif
 
+#if COROUTINE_ENABLE_SEMAPHORE && COROUTINE_ENABLE_MUTEX && COROUTINE_ENABLE_ASYNC && COROUTINE_ENABLE_WATCHDOG
     /**
      * @brief    获取通用接口
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-07-01
      */
     const Universal *(*GetUniversal)(void);
+#endif
 
+#if COROUTINE_ENABLE_WATCHDOG
     /**
      * @brief    喂狗
      * @param    timeout        喂狗超时 0：禁用看门狗
@@ -496,6 +534,7 @@ typedef struct
      * @date     2024-07-01
      */
     void (*FeedDog)(uint32_t timeout);
+#endif
 
     /**
      * @brief    设置默认堆栈大小

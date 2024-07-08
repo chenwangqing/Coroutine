@@ -1986,6 +1986,7 @@ static void Universal_DelayMs(uint32_t time)
     Coroutine_YieldTimeOut(time);
 }
 
+#if COROUTINE_ENABLE_SEMAPHORE && COROUTINE_ENABLE_MUTEX && COROUTINE_ENABLE_ASYNC && COROUTINE_ENABLE_WATCHDOG
 static const Universal *GetUniversal(void)
 {
     static const Universal universal = {
@@ -2010,6 +2011,7 @@ static const Universal *GetUniversal(void)
     };
     return &universal;
 }
+#endif
 
 const _Coroutine Coroutine = {
     SetInter,
@@ -2020,29 +2022,43 @@ const _Coroutine Coroutine = {
     Coroutine_Yield,
     Coroutine_YieldTimeOut,
     Coroutine_RunTick,
+#if COROUTINE_ENABLE_MAILBOX
     MakeMessage,
     DeleteMessage,
     CreateMailbox,
     DeleteMailbox,
     SendMail,
     ReceiveMail,
+#endif
+#if COROUTINE_ENABLE_PRINT_INFO
     PrintInfo,
+#endif
+#if COROUTINE_ENABLE_SEMAPHORE
     CreateSemaphore,
     DeleteSemaphore,
     GiveSemaphore,
     WaitSemaphore,
+#endif
+#if COROUTINE_ENABLE_MUTEX
     CreateMutex,
     DeleteMutex,
     LockMutex,
     UnlockMutex,
+#endif
     GetMillisecond,
     Malloc,
     Free,
     GetTaskName,
+#if COROUTINE_ENABLE_ASYNC
     ASync,
     ASyncWait,
     ASyncGetResultAndDelete,
+#endif
+#if COROUTINE_ENABLE_SEMAPHORE && COROUTINE_ENABLE_MUTEX && COROUTINE_ENABLE_ASYNC && COROUTINE_ENABLE_WATCHDOG
     GetUniversal,
+#endif
+#if COROUTINE_ENABLE_WATCHDOG
     FeedDog,
+#endif
     SetDefaultStackSize,
 };
