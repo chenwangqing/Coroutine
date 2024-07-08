@@ -184,8 +184,8 @@ struct _CO_TCB
     } wait_mutex;              // 等待互斥锁节点
     struct
     {
-        CM_NodeLink_t link;              // _CO_TCB
-        uint64_t      expiration_time;   // 看门狗过期时间 0：不启用
+        CM_RBTree_Link_t link;              // _CO_TCB
+        uint64_t         expiration_time;   // 看门狗过期时间 0：不启用
     } watchdog;
 
     CM_NodeLink_t    link;         // _CO_TCB
@@ -254,7 +254,8 @@ static struct
     CM_NodeLinkList_t mailboxes;             // 邮箱列表
     CM_NodeLinkList_t mutexes;               // 互斥列表 _CO_Mutex
     CO_Thread **      coroutines;            // 协程控制器
-    CM_NodeLinkList_t watchdogs;             // 看门狗列表 CO_TCB 从小到大
+    CM_RBTree_t       watchdogs;             // 看门狗列表 CO_TCB 从小到大
+    CO_TCB *          idx_watchdog;          // 当前看门狗
     uint64_t          check_watchdog_time;   // 看门狗检查时间
 #if !COROUTINE_ONLY_SHARED_STACK
     CM_NodeLinkList_t standalone_tasks_run[MAX_PRIORITY_NUM];   // 独立栈 运行任务列表 CO_TCB，根据优先级
@@ -339,8 +340,11 @@ static void DeleteTask(CO_TCB *t)
         t->isWaitMutex = 0;
     }
     // 移除看门狗
-    if (t->watchdog.expiration_time)
-        CM_NodeLink_Remove(&C_Static.watchdogs, &t->watchdog.link);
+    if (t->watchdog.expiration_time) {
+        CM_RBTree_Remove(&C_Static.watchdogs, &t->watchdog.link);
+        if (C_Static.idx_watchdog == t)
+            C_Static.idx_watchdog = CM_Field_ToType(CO_TCB, watchdog.link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
+    }
     // 释放名称
     if (t->name) Inter.Free(t->name, __FILE__, __LINE__);
     // 释放堆栈
@@ -519,10 +523,10 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
  */
 static void CheckWatchdog(void)
 {
-    if (Inter.GetMillisecond() < C_Static.check_watchdog_time || CM_NodeLink_IsEmpty(C_Static.watchdogs))
+    if (Inter.GetMillisecond() < C_Static.check_watchdog_time || C_Static.idx_watchdog == nullptr)
         return;
     C_Static.check_watchdog_time = Inter.GetMillisecond() + 10;   // 每 10ms 检查一次
-    CO_TCB *t                    = CM_Field_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(C_Static.watchdogs));
+    CO_TCB *t                    = C_Static.idx_watchdog;
     if (t->watchdog.expiration_time < Inter.GetMillisecond()) {
         // 看门狗超时
         if (Inter.events->watchdogTimeout != nullptr)
@@ -1197,7 +1201,8 @@ static int _PrintInfoTask(char *   buf,
         idx += co_snprintf(buf + idx,
                            max_size - idx,
                            "   %c   ",
-                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W' : 'S');
+                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W'
+                                                                                                                                            : 'S');
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
@@ -1772,6 +1777,17 @@ static void Free(void *      ptr,
     return;
 }
 
+static int __watchdogs_cm_rbtree_callback_compare(const CM_RBTree_t *     tree,
+                                                  const CM_RBTree_Link_t *new_val,
+                                                  const CM_RBTree_Link_t *val)
+{
+    CO_TCB *new_task = CM_Field_ToType(CO_TCB, watchdog.link, new_val);
+    CO_TCB *task     = CM_Field_ToType(CO_TCB, watchdog.link, val);
+    if (new_task->execv_time < task->execv_time)
+        return TREE_LEFT;
+    return TREE_RIGHT;
+}
+
 static void SetInter(const Coroutine_Inter *inter)
 {
     Inter = *inter;
@@ -1783,6 +1799,8 @@ static void SetInter(const Coroutine_Inter *inter)
         C_Static.coroutines[i]        = Coroutine_Create((size_t)-1);
         C_Static.coroutines[i]->co_id = i;
     }
+    // 初始化看门狗列表
+    CM_RBTree_Init(&C_Static.watchdogs, __watchdogs_cm_rbtree_callback_compare);
     // 默认堆栈大小
     C_Static.def_stack_size = coroutine_get_stack_default_size();
     return;
@@ -1866,7 +1884,7 @@ static void FeedDog(uint32_t time)
     CO_EnterCriticalSection();
     CO_TCB *task = c->idx_task;
     // 从已有的列表中删除
-    CM_NodeLink_Remove(&C_Static.watchdogs, &task->watchdog.link);
+    CM_RBTree_Remove(&C_Static.watchdogs, &task->watchdog.link);
     // 设置超时时间
     if (time == 0)
         task->watchdog.expiration_time = 0;
@@ -1874,33 +1892,12 @@ static void FeedDog(uint32_t time)
         task->watchdog.expiration_time = GetMillisecond() + time;
     if (task->watchdog.expiration_time) {
         // 添加到新的列表
-        if (CM_NodeLink_IsEmpty(C_Static.watchdogs)) {
-            CM_NodeLink_Init(&task->watchdog.link);
-            C_Static.watchdogs = &task->watchdog.link;
-        } else {
-            CO_TCB *s = CM_Field_ToType(CO_TCB, watchdog.link, CM_NodeLink_First(C_Static.watchdogs));
-            CO_TCB *e = CM_Field_ToType(CO_TCB, watchdog.link, CM_NodeLink_End(C_Static.watchdogs));
-            if (s->watchdog.expiration_time > task->watchdog.expiration_time) {
-                // 添加到头
-                CM_NodeLink_Insert(&C_Static.watchdogs, CM_NodeLink_End(C_Static.watchdogs), &task->watchdog.link);
-                C_Static.watchdogs = &task->watchdog.link;
-            } else if (e->watchdog.expiration_time <= task->watchdog.expiration_time) {
-                // 添加到尾巴
-                CM_NodeLink_Insert(&C_Static.watchdogs, CM_NodeLink_End(C_Static.watchdogs), &task->watchdog.link);
-            } else {
-                // 添加到中间
-                CO_TCB *r = nullptr;
-                CM_NodeLink_Foreach_Positive(CO_TCB, watchdog.link, C_Static.watchdogs, p)
-                {
-                    if (p->watchdog.expiration_time >= task->watchdog.expiration_time) {
-                        r = p;
-                        break;
-                    }
-                }
-                CM_NodeLink_Insert(&C_Static.watchdogs, r->watchdog.link.up, &task->watchdog.link);
-            }
-        }
-    }
+        CM_RBTree_Insert(&C_Static.watchdogs, &task->watchdog.link);
+        if (C_Static.idx_watchdog == nullptr ||
+            task->watchdog.expiration_time < C_Static.idx_watchdog->watchdog.expiration_time)
+            C_Static.idx_watchdog = task;
+    } else
+        C_Static.idx_watchdog = CM_Field_ToType(CO_TCB, watchdog.link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
     CO_LeaveCriticalSection();
     return;
 }
