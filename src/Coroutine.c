@@ -462,7 +462,6 @@ static CO_TCB *GetNextTask_StandaloneTask(CO_Thread *coroutine, uint8_t pri)
         // 移除运行列表
         CM_NodeLink_Remove(&C_Static.standalone_tasks_run[pri], &task->link);
         task->isAddRunStandaloneList = 0;
-        task->coroutine              = coroutine;
         C_Static.wait_run_standalone_task_count--;
     }
     return task;
@@ -505,6 +504,7 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
         AddTaskList(task, task->priority);
         return nullptr;
     }
+    task->coroutine     = coroutine;
     coroutine->idx_task = task;
     coroutine->_run_task_cnt++;
     coroutine->task_count++;
@@ -1197,8 +1197,7 @@ static int _PrintInfoTask(char *   buf,
         idx += co_snprintf(buf + idx,
                            max_size - idx,
                            "   %c   ",
-                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W'
-                                                                                                                                            : 'S');
+                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W' : 'S');
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);

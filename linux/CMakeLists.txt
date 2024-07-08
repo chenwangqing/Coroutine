@@ -54,7 +54,8 @@ set(CODE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/port.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/Coroutine.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/NodeLink.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/NodeLink.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/RBTree.c)
 
 
 # ------------------------------------- 编译 --------------------------------------

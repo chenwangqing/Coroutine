@@ -170,6 +170,29 @@ static void TestTask(void *func)
     return;
 }
 
+
+volatile uint64_t g_count = 0;
+
+static void Task7(void *obj)
+{
+    while (true) {
+        g_count++;
+        Coroutine.Yield();
+    }
+    return;
+}
+static void Task8(void *obj)
+{
+    uint64_t last_count = 0;
+    while (true) {
+        Coroutine.YieldDelay(1000);
+        uint64_t t  = g_count;
+        uint64_t tv = t - last_count;
+        last_count  = t;
+        printf("[%llu][7]count = %llu\n", Coroutine.GetMillisecond(), tv);
+    }
+}
+
 int main()
 {
     TestTask((void *)TestTask);
@@ -187,10 +210,9 @@ int main()
 
     Coroutine_TaskAttribute atr;
     memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
-    atr.co_idx        = -1;
-    atr.stack_size    = 1024 * 16;
-    atr.pri           = TASK_PRI_NORMAL;
-    atr.isSharedStack = false;
+    atr.co_idx     = -1;
+    atr.stack_size = 1024 * 16;
+    atr.pri        = TASK_PRI_NORMAL;
 
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task1, nullptr, "Task1", &atr);
@@ -200,13 +222,14 @@ int main()
     Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
     Sleep(rand() % 1000);
 
-    atr.isSharedStack = true;
-    atr.stack_size    = 0;
     Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task5, &num, "Task5-1", &atr);
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task6, &num, "Task5-2", &atr);
+
+    Coroutine.AddTask(Task7, nullptr, "Task7", &atr);
+    Coroutine.AddTask(Task8, nullptr, "Task8", &atr);
     while (true)
         Sleep(1000);
     return 0;
