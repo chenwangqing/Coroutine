@@ -56,7 +56,19 @@ static inline bool coroutine_get_stack_direction(void)
 }
 
 // clang-format off
-#if defined(__ARMCC_VERSION) // Arm Cortex-M
+#if defined(__riscv) && __riscv_xlen == 32 // RISC-V 32
+static inline  void coroutine_enter_task(void *func, void *arg, int *stack)
+{
+    int ret;
+    __asm volatile("mv a0, %2\n"
+        "mv sp, %3\n"
+        "jalr %1"
+        : "=r"(ret)
+        : "r" (func),"r"(arg),"r"(stack)
+    );
+    (void)ret;
+}
+#elif defined(__ARMCC_VERSION) // Arm Cortex-M
 static inline __asm void coroutine_enter_task(void *func, void *arg, int *stack)
 {
     MOV R3, R0  // R3 = func
