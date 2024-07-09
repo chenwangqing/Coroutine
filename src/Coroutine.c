@@ -1273,10 +1273,10 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     for (size_t i = 0; i < Inter.thread_count; i++)
         run_time += C_Static.coroutines[i]->run_time;
     if (run_time == 0) run_time = 1;
-    CM_NodeLink_Foreach_Positive(CO_TCB, task_list_link, C_Static.task_list, task)
-    {
-        // 清除已打印
-        task->isPrint = 0;
+    bool isPrint = false;
+    if (!CM_NodeLink_IsEmpty(C_Static.task_list)) {
+        CO_TCB *task = CM_Field_ToType(CO_TCB, task_list_link, CM_NodeLink_First(C_Static.task_list));
+        isPrint      = task->isPrint;
     }
     CO_LeaveCriticalSection();
     int count = 0;
@@ -1287,13 +1287,13 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
             break;
         }
         CO_TCB *task = CM_Field_ToType(CO_TCB, task_list_link, CM_NodeLink_First(C_Static.task_list));
-        if (task->isPrint) {
+        if (task->isPrint != isPrint) {
             CO_LeaveCriticalSection();
             break;
         }
         CM_NodeLink_Next(C_Static.task_list);
         idx += _PrintInfoTask(buf + idx, max_size - idx, task, max_stack, max_run, count++, run_time);
-        task->isPrint = 1;
+        task->isPrint = !isPrint;
         CO_LeaveCriticalSection();
     }
     CM_NodeLink_Foreach_Positive(CO_Thread, link, C_Static.threads, coroutine)
