@@ -1004,6 +1004,8 @@ static bool SendMail(Coroutine_Mailbox mb,
                 AddTaskList(task, task->priority);
                 dat   = nullptr;
                 co_id = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
+                // 溢出等待列表
+                CM_NodeLink_Remove(&mb->waits, &n->link);
                 break;
             }
             p = p->next;
@@ -1684,6 +1686,8 @@ static void UnlockMutex(Coroutine_Mutex mutex)
                 mutex->wait_count--;
                 // 加入等待列表
                 AddTaskList(task, task->priority);
+                // 移除等待列表
+                CM_NodeLink_Remove(&mutex->list, &task->wait_mutex.link);
                 // 获取最大等待时间
                 if (mutex->max_wait_time < tv)
                     mutex->max_wait_time = tv;
