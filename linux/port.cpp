@@ -117,7 +117,7 @@ static uint64_t GetMillisecond()
 
 static size_t GetThreadId(void)
 {
-    return (size_t)gettid();
+    return (size_t)pthread_self();
 }
 
 void Sleep(uint32_t time)
@@ -207,6 +207,11 @@ static Coroutine_Events events = {
         return;
     },
     Coroutine_WatchdogTimeout,
+    [](void *object, Coroutine_TaskId taskId, const char *name) -> void {
+        printf("Stack Error: %p %s\n", taskId, name);
+        while (true)
+            Sleep(1000);
+    },
 };
 
 static const Coroutine_Inter Inter = {
