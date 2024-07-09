@@ -526,7 +526,7 @@ typedef struct
 } _Coroutine;
 
 /**
- * @brief    协程内部接口（线程不安全）
+ * @brief    协程操作
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2022-08-16
  */

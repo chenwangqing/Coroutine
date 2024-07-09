@@ -314,7 +314,7 @@ static void DeleteTask(CO_TCB *t)
 }
 
 /**
- * @brief    加入任务列表
+ * @brief    加入任务列表 返回唤醒co_id
  * @param    coroutine      
  * @param    task           
  * @author   CXS (chenxiangshu@outlook.com)
@@ -506,8 +506,10 @@ static CO_Thread *GetSleepThread(void)
         return C_Static.coroutines[0];
     int idx = rand() % Inter.thread_count;
     for (size_t i = 0; i < Inter.thread_count; i++) {
-        if (C_Static.coroutines[idx]->isSleep)
+        if (C_Static.coroutines[idx]->isSleep) {
+            C_Static.coroutines[idx]->isSleep = 0;
             break;
+        }
         idx = (idx + 1) % Inter.thread_count;
     }
     return C_Static.coroutines[idx];
@@ -605,10 +607,24 @@ static void _Task(CO_Thread *coroutine)
     }
     coroutine->idx_task = nullptr;
     // 添加到运行列表
+    int co_id = -1;
     CO_EnterCriticalSection();
-    if (!(n->isAddRunList | n->isAddSleepList | n->isAddStopList | n->isAddRunStandaloneList))
+    if (!(n->isAddRunList | n->isAddSleepList | n->isAddStopList | n->isAddRunStandaloneList)) {
         AddTaskList((CO_TCB *)n, n->priority);
+        if (Inter.thread_count >1 && n->isAddRunStandaloneList && C_Static.wait_run_standalone_task_count > 1) {
+            // 唤醒其他线程
+            for (int i = 0; i < Inter.thread_count; i++) {
+                if (C_Static.coroutines[i]->isSleep) {
+                    co_id                           = C_Static.coroutines[i]->co_id;
+                    C_Static.coroutines[i]->isSleep = 0;
+                    break;
+                }
+            }
+        }
+    }
     CO_LeaveCriticalSection();
+    if (co_id >= 0 && Inter.events->wake != nullptr)
+        Inter.events->wake(co_id, Inter.events->object);
     // 周期事件
     if (Inter.events->Period != nullptr)
         Inter.events->Period(Inter.events->object);
