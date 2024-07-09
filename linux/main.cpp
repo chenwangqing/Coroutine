@@ -35,10 +35,11 @@ void Task1(void *obj)
         a1++;
         a2++;
         printf("[%llu][1][%llu/%d]i = %d %s\n", Coroutine.GetMillisecond(), ts, ms, i++, str.c_str());
-#if 0
-        Coroutine_MailData *data = Coroutine.MakeMessage(i & 0xFF, str.c_str(), str.size(), 1000);
-        if (!Coroutine.SendMail(mail1, data))
-            Coroutine.DeleteMessage(data);
+#if 01
+        char *buf = (char *)Coroutine.Malloc(str.size() + 1, __FILE__, __LINE__);
+        memcpy(buf, str.c_str(), str.size() + 1);
+        if (!Coroutine.SendMail(mail1, i & 0xFF, (uint64_t)buf, str.size() + 1, 1000))
+            Coroutine.Free(buf, __FILE__, __LINE__);
 #endif
         Sleep(10);
         Coroutine.PrintInfo(str_buf, 4 * 1024);
@@ -103,13 +104,13 @@ void Task4(void *obj)
         int ms = (rand() % 250) + 250;
         Coroutine.YieldDelay(ms);
         auto data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
-        if (data == NULL) continue;
+        if (data.data == 0 || data.isOk == false) continue;
         printf("[%llu][4]mail1 recv: %llu %.*s\n",
                Coroutine.GetMillisecond(),
-               data->eventId,
-               data->size,
-               (char *)data->data);
-        Coroutine.DeleteMessage(data);
+               data.id,
+               data.size,
+               (char *)data.data);
+        Coroutine.Free((void *)data.data, __FILE__, __LINE__);
         Sleep(2);
     }
     return;

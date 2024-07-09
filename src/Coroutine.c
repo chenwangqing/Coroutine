@@ -224,6 +224,7 @@ static struct
 static void DeleteMessage(Coroutine_MailData *dat);
 #endif
 static Coroutine_Handle       Coroutine_Create(size_t id);
+static CO_Thread *            GetCurrentThread(int co_idx);
 volatile static func_setjmp_t _c_setjmp = setjmp;
 
 // 栈错误
@@ -611,7 +612,7 @@ static void _Task(CO_Thread *coroutine)
     CO_EnterCriticalSection();
     if (!(n->isAddRunList | n->isAddSleepList | n->isAddStopList | n->isAddRunStandaloneList)) {
         AddTaskList((CO_TCB *)n, n->priority);
-        if (Inter.thread_count >1 && n->isAddRunStandaloneList && C_Static.wait_run_standalone_task_count > 1) {
+        if (Inter.thread_count > 1 && n->isAddRunStandaloneList && C_Static.wait_run_standalone_task_count > 1) {
             // 唤醒其他线程
             for (int i = 0; i < Inter.thread_count; i++) {
                 if (C_Static.coroutines[i]->isSleep) {
@@ -645,14 +646,13 @@ static void ContextSwitch(volatile CO_TCB *n)
     if (ret == 0) {
         volatile STACK_TYPE __mem   = 0x11223344;               // 利用局部变量获取堆栈寄存器值
         STACK_TYPE *        p_stack = ((STACK_TYPE *)&__mem);   // 获取栈结尾
-        p_stack -= 4;
         // 检查栈溢出
         if (p_stack <= n->stack) {
             // 栈溢出
             ERROR_STACK(n);
         }
         // 计算栈大小
-        n->stack_len = n->stack_alloc - (p_stack - n->stack);
+        n->stack_len = n->stack_alloc - (p_stack - n->stack) + 4;
         // 记录最大栈大小
         if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
 #if COROUTINE_CHECK_STACK
@@ -674,8 +674,9 @@ static void ContextSwitch(volatile CO_TCB *n)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2022-08-15
  */
-static void _Yield(CO_Thread *coroutine, uint32_t timeout)
+static void _Yield(uint32_t timeout)
 {
+    CO_Thread *coroutine = GetCurrentThread(-1);
     if (coroutine == nullptr)
         return;
     CO_TCB *n = coroutine->idx_task;
@@ -865,7 +866,7 @@ static size_t GetThreadId(uint16_t co_id)
  */
 static void Coroutine_Yield(void)
 {
-    _Yield((CO_Thread *)GetCurrentThread(-1), 0);
+    _Yield(0);
     return;
 }
 
@@ -882,7 +883,7 @@ static uint32_t Coroutine_YieldTimeOut(uint32_t timeout)
         return 0;
     }
     uint64_t ts = Inter.GetMillisecond();
-    _Yield((CO_Thread *)GetCurrentThread(-1), timeout);
+    _Yield(timeout);
     ts = Inter.GetMillisecond() - ts;                   // 计算耗时
     return ts > timeout ? (uint32_t)ts - timeout : 0;   // 返回误差
 }
@@ -1020,7 +1021,7 @@ static bool SendMail(Coroutine_Mailbox mb,
                 AddTaskList(task, task->priority);
                 dat   = nullptr;
                 co_id = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
-                // 溢出等待列表
+                // 移出等待列表
                 CM_NodeLink_Remove(&mb->waits, &n->link);
                 break;
             }
@@ -1107,7 +1108,7 @@ static Coroutine_MailResult ReceiveMail(Coroutine_Mailbox mb,
     mb->wait_count++;
     CO_LeaveCriticalSection();
     // 等待消息
-    _Yield(c, timeout);
+    _Yield(timeout);
     // 取出消息
     CO_EnterCriticalSection();
     if (n->data) {
@@ -1193,8 +1194,7 @@ static int _PrintInfoTask(char *   buf,
         idx += co_snprintf(buf + idx,
                            max_size - idx,
                            "   %c   ",
-                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W'
-                                                                                                                                            : 'S');
+                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W' : 'S');
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
@@ -1552,13 +1552,13 @@ static bool WaitSemaphore(Coroutine_Semaphore _sem, uint32_t val, uint32_t timeo
         }
         uint64_t tv = Inter.GetMillisecond() - now;
         if (tv >= (uint64_t)timeout) {
-            _Yield(c, 0);
+            _Yield(0);
             return false;
         }
         // 计算剩余等待时间
         tv = timeout - tv;
         // 等待
-        _Yield(c, tv);
+        _Yield(tv);
         // 移除等待列表
         CO_EnterCriticalSection();
         if (n->isOk)
@@ -1644,13 +1644,13 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
         if (isOk) return true;   // 获取锁成功
         uint64_t tv = Inter.GetMillisecond() - now;
         if (tv >= (uint64_t)timeout) {
-            _Yield(c, 0);
+            _Yield(0);
             return false;
         }
         // 计算剩余等待时间
         tv = timeout - tv;
         // 等待
-        _Yield(c, tv);
+        _Yield(tv);
         // 移除等待列表
         CO_EnterCriticalSection();
         CM_NodeLink_Remove(&mutex->list, &task->wait_mutex.link);
@@ -1702,7 +1702,7 @@ static void UnlockMutex(Coroutine_Mutex mutex)
                 mutex->wait_count--;
                 // 加入等待列表
                 AddTaskList(task, task->priority);
-                // 移除等待列表
+                // 移出等待列表
                 CM_NodeLink_Remove(&mutex->list, &task->wait_mutex.link);
                 // 获取最大等待时间
                 if (mutex->max_wait_time < tv)
