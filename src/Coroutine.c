@@ -135,6 +135,7 @@ struct _CO_TCB
     uint16_t       isAddSleepList : 1;           // 添加睡眠列表
     uint16_t       isAddStopList : 1;            // 添加停止列表
     uint16_t       isDynamicThread : 1;          // 动态线程
+    uint16_t       isPrint : 1;                  // 已打印
     uint8_t        priority;                     // 当前优先级
     uint8_t        init_priority;                // 初始化优先级
     Coroutine_Task func;                         // 执行
@@ -216,9 +217,9 @@ static struct
     CM_NodeLinkList_t semaphores;            // 信号列表
     CM_NodeLinkList_t mailboxes;             // 邮箱列表
     CM_NodeLinkList_t mutexes;               // 互斥列表 _CO_Mutex
-    CM_NodeLinkList_t task_list;             // 任务列表 WatchdogNode
+    CM_NodeLinkList_t task_list;             // 任务列表
     CO_Thread **      coroutines;            // 协程控制器
-    CM_RBTree_t       watchdogs;             // 看门狗列表 CO_TCB 从小到大
+    CM_RBTree_t       watchdogs;             // 看门狗列表 WatchdogNode 从小到大
     CO_TCB *          idx_watchdog;          // 当前看门狗
     uint64_t          check_watchdog_time;   // 看门狗检查时间
 #if !COROUTINE_ONLY_SHARED_STACK
@@ -1186,10 +1187,14 @@ static int _PrintInfoTask(char *   buf,
         idx += co_snprintf(buf + idx, max_size - idx, "%u|%u ", p->priority, p->init_priority);
         if (idx >= max_size)
             break;
-        idx += co_snprintf(buf + idx,
-                           max_size - idx,
-                           "   %c   ",
-                           p->coroutine != nullptr && p->coroutine->idx_task == p ? 'R' : (p->isWaitMail || p->isWaitSem || p->isWaitMutex) ? 'W' : 'S');
+        char sta = 'S';
+        if (p->coroutine != nullptr && p->coroutine->idx_task == p)
+            sta = 'R';
+        else if (p->isWaitMail || p->isWaitSem || p->isWaitMutex)
+            sta = 'W';
+        else if (p->isDel)
+            sta = 'D';
+        idx += co_snprintf(buf + idx, max_size - idx, "   %c   ", sta);
         if (idx >= max_size)
             break;
         idx += co_snprintf(buf + idx, max_size - idx, "%s ", stack);
@@ -1268,23 +1273,44 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     for (size_t i = 0; i < Inter.thread_count; i++)
         run_time += C_Static.coroutines[i]->run_time;
     if (run_time == 0) run_time = 1;
-    int count = 0;
     CM_NodeLink_Foreach_Positive(CO_TCB, task_list_link, C_Static.task_list, task)
     {
+        // 清除已打印
+        task->isPrint = 0;
+    }
+    CO_LeaveCriticalSection();
+    int count = 0;
+    while (true) {
+        CO_EnterCriticalSection();
+        if (CM_NodeLink_IsEmpty(C_Static.task_list)) {
+            CO_LeaveCriticalSection();
+            break;
+        }
+        CO_TCB *task = CM_Field_ToType(CO_TCB, task_list_link, CM_NodeLink_First(C_Static.task_list));
+        if (task->isPrint) {
+            CO_LeaveCriticalSection();
+            break;
+        }
+        CM_NodeLink_Next(C_Static.task_list);
         idx += _PrintInfoTask(buf + idx, max_size - idx, task, max_stack, max_run, count++, run_time);
+        task->isPrint = 1;
+        CO_LeaveCriticalSection();
     }
     CM_NodeLink_Foreach_Positive(CO_Thread, link, C_Static.threads, coroutine)
     {
         uint64_t tv = Inter.GetMillisecond() - coroutine->start_time;
         if (tv == 0)
             tv = 1;
-        int a = coroutine->run_time * 1000 / tv;
+        CO_EnterCriticalSection();
+        uint64_t run_time = coroutine->run_time;
+        CO_LeaveCriticalSection();
+        int a = run_time * 1000 / tv;
         idx += co_snprintf(buf + idx,
                            max_size - idx,
                            "ThreadId: %llX(%u) RunTime: %llu(%d.%d%%) ms\r\n",
                            (uint64_t)coroutine->ThreadId,
                            coroutine->co_id,
-                           coroutine->run_time,
+                           run_time,
                            a / 10,
                            a % 10);
     }
@@ -1295,6 +1321,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     int sn = 0;
+    CO_EnterCriticalSection();
     CM_NodeLink_Foreach_Positive(CO_Semaphore, link, C_Static.semaphores, s)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
@@ -1303,6 +1330,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", s->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
+    CO_LeaveCriticalSection();
     // ----------------------------- 邮箱 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
@@ -1311,6 +1339,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
+    CO_EnterCriticalSection();
     CM_NodeLink_Foreach_Positive(CO_Mailbox, link, C_Static.mailboxes, mb)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
@@ -1320,6 +1349,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
+    CO_LeaveCriticalSection();
     // ----------------------------- 互斥 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
@@ -1332,6 +1362,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     idx += co_snprintf(buf + idx, max_size - idx, "MaxWaitTime");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
+    CO_EnterCriticalSection();
     CM_NodeLink_Foreach_Positive(CO_Mutex, link, C_Static.mutexes, m)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
