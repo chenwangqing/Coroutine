@@ -635,14 +635,13 @@ static void ContextSwitch(volatile CO_TCB *n)
     if (ret == 0) {
         volatile STACK_TYPE __mem   = 0x11223344;               // 利用局部变量获取堆栈寄存器值
         STACK_TYPE *        p_stack = ((STACK_TYPE *)&__mem);   // 获取栈结尾
-        p_stack -= 4;
         // 检查栈溢出
         if (p_stack <= n->stack) {
             // 栈溢出
             ERROR_STACK(n);
         }
         // 计算栈大小
-        n->stack_len = n->stack_alloc - (p_stack - n->stack);
+        n->stack_len = n->stack_alloc - (p_stack - n->stack) + 4;
         // 记录最大栈大小
         if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
 #if COROUTINE_CHECK_STACK
