@@ -327,6 +327,8 @@ static void DeleteTask(CO_TCB *t)
  */
 static void AddTaskList(CO_TCB *task, uint8_t new_pri)
 {
+    if (task->isRuning)
+        return;
     CO_Thread *coroutine = task->coroutine;
     uint64_t   now       = Inter.GetMillisecond();
     if (task->isAddRunList) {
@@ -522,7 +524,6 @@ static void __task(CO_TCB *n)
     n->priority = 0;
     n->isDel    = true;
     // 回到调度器
-    CO_EnterCriticalSection();
     longjmp(n->coroutine->env, 1);
 }
 
@@ -559,11 +560,9 @@ static void _enter_into(volatile CO_TCB *n)
             //! 不会执行到这里
         } else {
             // 回到 SaveStack.setjmp
-            CO_EnterCriticalSection();
             longjmp(((CO_TCB *)n)->env, 1);
         }
     }
-    CO_LeaveCriticalSection();
     return;
 }
 
@@ -614,16 +613,16 @@ static void _Task(CO_Thread *coroutine)
     CO_EnterCriticalSection();
     n->isRuning         = 0;
     coroutine->idx_task = nullptr;
-    if (!(n->isAddRunList | n->isAddSleepList | n->isAddStopList | n->isAddRunStandaloneList)) {
-        AddTaskList((CO_TCB *)n, n->priority);
-        if (Inter.thread_count > 1 && n->isAddRunStandaloneList && C_Static.wait_run_standalone_task_count > 1) {
-            // 唤醒其他线程
-            for (int i = 0; i < Inter.thread_count; i++) {
-                if (C_Static.coroutines[i]->isSleep) {
-                    co_id                           = C_Static.coroutines[i]->co_id;
-                    C_Static.coroutines[i]->isSleep = 0;
-                    break;
-                }
+    AddTaskList((CO_TCB *)n, n->priority);
+    if (Inter.thread_count > 1 &&
+        n->isAddRunStandaloneList &&
+        C_Static.wait_run_standalone_task_count > 1) {
+        // 唤醒其他线程
+        for (int i = 0; i < Inter.thread_count; i++) {
+            if (C_Static.coroutines[i]->isSleep) {
+                co_id                           = C_Static.coroutines[i]->co_id;
+                C_Static.coroutines[i]->isSleep = 0;
+                break;
             }
         }
     }
@@ -664,11 +663,9 @@ static void ContextSwitch(CO_TCB *n, CO_Thread *coroutine)
         // 检查栈哨兵
         CHECK_STACK_SENTRY(n);
 #endif
-        CO_EnterCriticalSection();
         // 回到调度器
         longjmp(coroutine->env, 1);
     }
-    CO_LeaveCriticalSection();
     return;
 }
 
