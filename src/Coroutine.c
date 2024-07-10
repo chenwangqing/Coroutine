@@ -528,7 +528,6 @@ static void __task(CO_TCB *n)
 
 static void _enter_into(volatile CO_TCB *n)
 {
-    volatile size_t     id      = Inter.GetThreadId();
     volatile STACK_TYPE __stack = 0x44332211;
     // 获取栈起始指针
     if (n->coroutine->stack == nullptr)
@@ -565,7 +564,6 @@ static void _enter_into(volatile CO_TCB *n)
         }
     }
     CO_LeaveCriticalSection();
-    (void)id;
     return;
 }
 
@@ -666,10 +664,6 @@ static void ContextSwitch(CO_TCB *n, CO_Thread *coroutine)
         // 检查栈哨兵
         CHECK_STACK_SENTRY(n);
 #endif
-        size_t id  = Inter.GetThreadId();
-        size_t id2 = gettid();
-        (void)id;
-        (void)id2;
         CO_EnterCriticalSection();
         // 回到调度器
         longjmp(coroutine->env, 1);
