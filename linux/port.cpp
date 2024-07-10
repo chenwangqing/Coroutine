@@ -117,7 +117,10 @@ static uint64_t GetMillisecond()
 
 static size_t GetThreadId(void)
 {
-    return (size_t)pthread_self();
+    static __thread pid_t cached_tid = 0;
+    if (cached_tid == 0)
+        cached_tid = gettid();
+    return (size_t)cached_tid;
 }
 
 void Sleep(uint32_t time)
@@ -142,7 +145,7 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
     }
 }
 
-#define MAX_THREADS 3
+#define MAX_THREADS 4
 
 class IdleNode {
 public:
@@ -238,14 +241,14 @@ const Coroutine_Inter *GetInter(void)
 void RunTask(void *(*func)(void *arg), void *arg)
 {
     // 创建线程
-    pthread_t      tmp;
-    int            err = 0;
-    pthread_attr_t attr;                                           // 线程属性
-    pthread_attr_init(&attr);                                      // 初始化线程属性
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);   // 设置线程属性 分离线程 可自动释放资源
-    pthread_attr_setstacksize(&attr, 32 << 10);                    // 一个线程内存设置为32KB
-    err = pthread_create(&tmp, &attr, func, arg);
-    pthread_attr_destroy(&attr);
+    pthread_t tmp;
+    int       err = 0;
+    // pthread_attr_t attr;                                           // 线程属性
+    // pthread_attr_init(&attr);                                      // 初始化线程属性
+    // pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);   // 设置线程属性 分离线程 可自动释放资源
+    // pthread_attr_setstacksize(&attr, 32 << 10);                    // 一个线程内存设置为32KB
+    err = pthread_create(&tmp, NULL, func, arg);
+    // pthread_attr_destroy(&attr);
     (void)err;
     return;
 }
