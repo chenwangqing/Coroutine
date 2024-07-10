@@ -67,7 +67,7 @@ extern "C" {
 
 // 任务调度时进行栈检查，会增加调度时间开销但能及时发现栈溢出的错误，适用于开发阶段
 #ifndef COROUTINE_CHECK_STACK
-#define COROUTINE_CHECK_STACK 1
+#define COROUTINE_CHECK_STACK 0
 #endif
 // 启用邮箱
 #ifndef COROUTINE_ENABLE_MAILBOX
