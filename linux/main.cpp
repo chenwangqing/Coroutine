@@ -10,6 +10,7 @@ extern void PrintMemory(void);
 Coroutine_Semaphore sem1;
 Coroutine_Mailbox   mail1;
 Coroutine_Mutex     lock;
+Coroutine_Channel   ch1;
 
 static uint64_t Task1_func1(uint32_t timeout)
 {
@@ -182,6 +183,7 @@ static void Task7(void *obj)
     }
     return;
 }
+
 static void Task8(void *obj)
 {
     uint64_t last_count = 0;
@@ -191,6 +193,30 @@ static void Task8(void *obj)
         uint64_t tv = t - last_count;
         last_count  = t;
         printf("[%llu][7]count = %llu\n", Coroutine.GetMillisecond(), tv);
+    }
+}
+
+static void Task_Channel1(void *obj)
+{
+    size_t   num = 0;
+    uint64_t now = Coroutine.GetMillisecond();
+    while (true) {
+        Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);
+        Coroutine.ReadChannel(ch1, &num, UINT32_MAX);
+        if (Coroutine.GetMillisecond() - now >= 1000) {
+            now = Coroutine.GetMillisecond();
+            printf("[%llu][ch]num = %llu\n", Coroutine.GetMillisecond(), num);
+            num = 0;
+        }
+    }
+}
+
+static void Task_Channel2(void *obj)
+{
+    size_t num = 0;
+    while (true) {
+        Coroutine.ReadChannel(ch1, &num, UINT32_MAX);
+        Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);
     }
 }
 
@@ -207,6 +233,7 @@ int main()
     sem1    = Coroutine.CreateSemaphore("sem1", 0);
     mail1   = Coroutine.CreateMailbox("mail1", 1024);
     lock    = Coroutine.CreateMutex("lock");
+    ch1     = Coroutine.CreateChannel("ch1", 1);
     int num = 0;
 
     Coroutine_TaskAttribute atr;
@@ -231,6 +258,9 @@ int main()
 
     Coroutine.AddTask(Task7, nullptr, "Task7", &atr);
     Coroutine.AddTask(Task8, nullptr, "Task8", &atr);
+
+    Coroutine.AddTask(Task_Channel1, nullptr, "Channel1", &atr);
+    Coroutine.AddTask(Task_Channel2, nullptr, "Channel2", &atr);
     while (true)
         Sleep(1000);
     return 0;

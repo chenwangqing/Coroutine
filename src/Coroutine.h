@@ -30,7 +30,7 @@
  * <tr><td>2024-07-04 <td>1.17    <td>CXS    <td>独立栈动态分配线程运行
  * <tr><td>2024-07-05 <td>1.18    <td>CXS    <td>删除共享栈，独立栈切换速度快更加实用;添加红黑树用于休眠列表
  * <tr><td>2024-07-08 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪；完善邮件通信
- * <tr><td>2024-07-10 <td>1.20    <td>CXS    <td>修正跨线程的协程调度错误；完善错误事件
+ * <tr><td>2024-07-10 <td>1.20    <td>CXS    <td>修正跨线程的协程调度错误；完善错误事件；添加通道
  * </table>
  *
  * @note
@@ -94,6 +94,10 @@ extern "C" {
 #ifndef COROUTINE_ENABLE_PRINT_INFO
 #define COROUTINE_ENABLE_PRINT_INFO 1
 #endif
+// 启用管道
+#ifndef COROUTINE_ENABLE_CHANNEL
+#define COROUTINE_ENABLE_CHANNEL 1
+#endif
 
 // -------------- 独立栈协程 --------------
 // 优点：切换速度快
@@ -107,6 +111,7 @@ typedef struct _CO_Semaphore *Coroutine_Semaphore;   // 信号量
 typedef struct _CO_Mailbox *  Coroutine_Mailbox;     // 邮箱
 typedef struct _CO_ASync *    Coroutine_ASync;       // 异步任务
 typedef struct _CO_Mutex *    Coroutine_Mutex;       // 互斥锁(可递归)
+typedef struct _CO_Channel *  Coroutine_Channel;     // 管道(！！！不能在协程以外的地方使用！！！)
 
 typedef enum
 {
@@ -387,9 +392,7 @@ typedef struct
      *  SN   TaskId   Func    Pri                 Status Stack                Runtime       WaitTime   DogTime    Name
      * 序号  任务id   函数地址 当前优先级|初始优先级 状态 栈大小/栈最大/栈分配 运行时间(ms) 等待时间(ms) 看门狗时间(ms) 名称
      *   1 00C91124 007D115E  2|2                 MW   1128/1128/16384      14(51%)       58         29958      Task3
-     * Status：<M><S>
-     *        <M> M: 独立栈协程  S: 共享栈协程
-     *        <S> R: 指针运行 S: 休眠 W: 等待
+     * Status：RUN: 正在运行 SLR: 休眠/就绪 MAI: 等待邮件 SEM: 等待信号 MUT: 等待互斥 CHL: 等待通道 DEL: 死亡 
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-08-16
      */
@@ -566,6 +569,46 @@ typedef struct
      * @date     2024-07-05
      */
     void (*SetDefaultStackSize)(uint32_t size);
+
+#if COROUTINE_ENABLE_CHANNEL
+    /**
+     * @brief    创建通道
+     * @param    name           名称 最大31字节
+     * @param    caches         缓存数量 0：不缓存
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-10
+     */
+    Coroutine_Channel (*CreateChannel)(const char *name, uint32_t caches);
+
+    /**
+     * @brief    删除通道
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-10
+     */
+    void (*DeleteChannel)(Coroutine_Channel ch);
+
+    /**
+     * @brief    写通道数据(！！！不能在协程以外的地方使用！！！)
+     * @param    ch             通道实例
+     * @param    data           写入数据
+     * @param    timeout        写入超时
+     * @return   true           写入成功
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-10
+     */
+    bool (*WriteChannel)(Coroutine_Channel ch, size_t data, uint32_t timeout);
+
+    /**
+     * @brief    读取通道数据(！！！不能在协程以外的地方使用！！！)
+     * @param    ch             通道实例
+     * @param    data           读取数据缓存
+     * @param    timeout        读取超时
+     * @return   true           读取成功
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-10
+     */
+    bool (*ReadChannel)(Coroutine_Channel ch, size_t *data, uint32_t timeout);
+#endif
 } _Coroutine;
 
 /**
