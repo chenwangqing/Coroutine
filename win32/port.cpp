@@ -80,10 +80,10 @@ static uint64_t GetMillisecond()
 
 static size_t GetThreadId(void)
 {
-   static __declspec(thread) size_t id = 0;
-   if(id == 0)
-       id = GetCurrentThreadId();
-   return id;
+    static __declspec(thread) size_t id = 0;
+    if (id == 0)
+        id = GetCurrentThreadId();
+    return id;
 }
 
 static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, const char *name)
@@ -106,7 +106,6 @@ static Coroutine_Events events = {
         // SwitchToThread();
         return;
     },
-    nullptr,
     [](uint32_t time, void *object) -> void {
         // Sleep(1); 模拟休眠
         int idx = Coroutine.GetCurrentCoroutineIdx();
@@ -127,7 +126,21 @@ static Coroutine_Events events = {
             ReleaseSemaphore(sem_sleep[co_id], 1, NULL);
         return;
     },
-    Coroutine_WatchdogTimeout,
+    [](void                      *object,
+       int                        line,
+       Coroutine_ErrEvent_t       event,
+       const Coroutine_ErrPars_t *pars) -> void {
+        printf("Coroutine Error: %d\n", event);
+        switch (event) {
+            case CO_ERR_WATCHDOG_TIMEOUT:
+                break;
+            default:
+                break;
+        }
+        while (true)
+            Sleep(1000);
+        return;
+    },
 };
 
 static const Coroutine_Inter Inter = {

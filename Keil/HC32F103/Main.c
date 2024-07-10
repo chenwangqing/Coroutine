@@ -89,8 +89,8 @@ void Task3(void *obj)
             LOG_DEBUG("[3]async result: %d/%d", b[0], b[1]);
             re = nullptr;
         }
-        if (!re)
-            re = Coroutine.Async(Task3_Func, a, 1024);
+//        if (!re)
+//            re = Coroutine.Async(Task3_Func, a, 512);
     }
     //    return;
 }
