@@ -76,6 +76,10 @@ static void _Free(void *ptr, const char *file, int line)
     p--;
     CriticalSection(true);
     memory.used -= (*p) + sizeof(size_t);
+	if(memory.used <0)
+	{
+		while(true);
+	}
     CriticalSection(false);
     free(p);
 #else
@@ -88,6 +92,10 @@ static void *_Malloc(size_t size, const char *file, int line)
 {
 #if DEBUG_MEMORY
     size_t *ptr = (size_t *)malloc(size + sizeof(size_t));
+	if(ptr == nullptr)
+	{
+		while(true);
+	}
     *ptr        = size;
     CriticalSection(true);
     memory.used += size + sizeof(size_t);
@@ -229,6 +237,6 @@ NPLOG nplog = {_print, _PrintArray};
 
 void PrintMemory(void)
 {
-    LOG_PRINTF("Memory used: %lld bytes, max used: %lld bytes", memory.used, memory.max_used);
+    LOG_PRINTF("Memory used: %lld bytes, max used: %lld/%u bytes", memory.used, memory.max_used,0x4000);
     return;
 }

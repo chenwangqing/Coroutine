@@ -80,7 +80,10 @@ static uint64_t GetMillisecond()
 
 static size_t GetThreadId(void)
 {
-    return GetCurrentThreadId();
+   static __declspec(thread) size_t id = 0;
+   if(id == 0)
+       id = GetCurrentThreadId();
+   return id;
 }
 
 static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, const char *name)

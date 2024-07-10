@@ -34,12 +34,9 @@ static void Task1(void *arg)
         LOG_DEBUG("[1][%llu/%d]i = %d", ts, ms, i++);
         PrintMemory();
         const int mlen = 1024 + 512;
-        char *    str  = Coroutine.Malloc(mlen, __FILE__, __LINE__);
-        if (str) {
-            int n = Coroutine.PrintInfo(str, mlen);
-            UART_LOG(str, n);
-            Coroutine.Free(str, __FILE__, __LINE__);
-        }
+        static char str[mlen];
+		int n = Coroutine.PrintInfo(str, mlen);
+		UART_LOG(str, n);
     }
     // return;
 }

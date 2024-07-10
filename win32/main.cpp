@@ -37,7 +37,7 @@ void Task1(void *obj)
         uint64_t    ts  = Task1_func1(ms);
         str += std::to_string(i);
         printf("[%llu][1][%llu/%d]i = %d %s\n", Coroutine.GetMillisecond(), ts, ms, i++, str.c_str());
-#if 0
+#if 01
         char *buf = (char *)Coroutine.Malloc(str.size() + 1, __FILE__, __LINE__);
         memcpy(buf, str.c_str(), str.size() + 1);
         if (!Coroutine.SendMail(mail1, i & 0xFF, (uint64_t)buf, str.size() + 1,1000))

@@ -645,7 +645,8 @@ static void _Task(CO_Thread *coroutine)
 static void ContextSwitch(CO_TCB *n, CO_Thread *coroutine)
 {
     // 保存环境,回到调度器
-    if (_c_setjmp(((CO_TCB *)n)->env) == 0) {
+    int ret = _c_setjmp(((CO_TCB*)n)->env);
+    if (ret == 0) {
         volatile STACK_TYPE __mem   = 0x11223344;               // 利用局部变量获取堆栈寄存器值
         STACK_TYPE *        p_stack = ((STACK_TYPE *)&__mem);   // 获取栈结尾
         // 检查栈溢出
