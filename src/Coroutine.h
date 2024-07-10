@@ -2,7 +2,7 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.19
+ * @version  1.20
  * @date     2022-08-15
  *
  * @copyright Copyright (c) 2022  Four-Faith
@@ -30,6 +30,7 @@
  * <tr><td>2024-07-04 <td>1.17    <td>CXS    <td>独立栈动态分配线程运行
  * <tr><td>2024-07-05 <td>1.18    <td>CXS    <td>删除共享栈，独立栈切换速度快更加实用;添加红黑树用于休眠列表
  * <tr><td>2024-07-08 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪；完善邮件通信
+ * <tr><td>2024-07-10 <td>1.20    <td>CXS    <td>修正跨线程的协程调度错误；完善错误事件
  * </table>
  *
  * @note
@@ -98,28 +99,72 @@ extern "C" {
 // 优点：切换速度快
 // 缺点：占用内存大，容易造成栈溢出，某个任务都需要分配较大的栈空间
 
+#define COROUTINE_VERSION "1.20"
+
 typedef struct _CO_Thread *   Coroutine_Handle;      // 协程实例
 typedef struct _CO_TCB *      Coroutine_TaskId;      // 任务id
 typedef struct _CO_Semaphore *Coroutine_Semaphore;   // 信号量
 typedef struct _CO_Mailbox *  Coroutine_Mailbox;     // 邮箱
 typedef struct _CO_ASync *    Coroutine_ASync;       // 异步任务
 typedef struct _CO_Mutex *    Coroutine_Mutex;       // 互斥锁(可递归)
+
+typedef enum
+{
+    CO_ERR_WATCHDOG_TIMEOUT = 0,   // 看门狗超时
+    CO_ERR_STACK_OVERFLOW   = 1,   // 栈溢出
+    CO_ERR_MUTEX_RELIEVE    = 2,   // 互斥锁释放错误
+    CO_ERR_MEMORY_ALLOC     = 3,   // 内存分配失败
+} Coroutine_ErrEvent_t;
+
+/**
+ * @brief    错误事件参数
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-10
+ */
+typedef union
+{
+    // CO_ERR_WATCHDOG_TIMEOUT
+    struct
+    {
+        Coroutine_TaskId taskId;
+    } watchdog_timeout;
+    // CO_ERR_STACK_OVERFLOW
+    struct
+    {
+        Coroutine_TaskId taskId;
+        size_t           stack_size;   // 超出栈大小
+    } stack_overflow;
+    // CO_ERR_MUTEX_RELIEVE
+    struct
+    {
+        Coroutine_TaskId taskId;
+        Coroutine_Mutex  mutex;   // 互斥锁
+    } mutex_relieve;
+    // CO_ERR_MEMORY_ALLOC
+    struct
+    {
+        int         line;   // 错误发生行
+        const char *file;   // 错误发生文件
+        size_t      size;   // 内存大小
+    } memory_alloc;
+} Coroutine_ErrPars_t;
+
 // 任务回调
 typedef void (*Coroutine_Task)(void *obj);
 // 周期回调（用于看门狗）
 typedef void (*Coroutine_Period_Event)(void *object);
-// 内存分配失败
-typedef void (*Coroutine_Allocation_Event)(int line, size_t size, void *object);
 // 空闲事件（可用于低功耗休眠）
 typedef void (*Coroutine_Idle_Event)(uint32_t time, void *object);
 // 线程空闲唤醒
 typedef void (*Coroutine_Wake_Event)(uint16_t co_id, void *object);
 // 异步任务
 typedef void *(*Coroutine_AsyncTask)(void *arg);
-// 任务看门狗超时事件
-typedef void (*Coroutine_WatchdogTimeout_Event)(void *object, Coroutine_TaskId taskId, const char *name);
-// 栈错误事件
-typedef void (*Coroutine_StackError_Event)(void *object, Coroutine_TaskId taskId, const char *name);
+// 错误事件
+typedef void (*Coroutine_Error_Event)(void *                     object, /* 用户对象 */
+                                      int                        line,   /* 事件发生行 */
+                                      Coroutine_ErrEvent_t       event,  /* 事件类型 */
+                                      const Coroutine_ErrPars_t *pars    /* 事件参数 */
+);
 
 /**
  * @brief    协程事件
@@ -128,13 +173,11 @@ typedef void (*Coroutine_StackError_Event)(void *object, Coroutine_TaskId taskId
  */
 typedef struct
 {
-    void *                          object;            // 用户对象
-    Coroutine_Period_Event          Period;            // 周期事件
-    Coroutine_Allocation_Event      Allocation;        // 分配失败事件
-    Coroutine_Idle_Event            Idle;              // 空闲事件
-    Coroutine_Wake_Event            wake;              // 唤醒事件
-    Coroutine_WatchdogTimeout_Event watchdogTimeout;   // 看门狗超时事件
-    Coroutine_StackError_Event      stackError;        // 栈错误事件
+    void *                 object;   // 用户对象
+    Coroutine_Period_Event Period;   // 周期事件
+    Coroutine_Idle_Event   Idle;     // 空闲事件
+    Coroutine_Wake_Event   wake;     // 唤醒事件
+    Coroutine_Error_Event  error;    // 错误事件
 } Coroutine_Events;
 
 // 协程接口
@@ -474,7 +517,7 @@ typedef struct
      * @brief    执行异步任务
      * @param    func           执行函数
      * @param    arg            参数
-     * @param    stacks         栈大小 字节 0：使用默认 共享栈默认：512 独立栈默认：4KB 共享栈会自动根据使用情况分配
+     * @param    stacks         栈大小 字节 0：使用默认
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */

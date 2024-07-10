@@ -136,15 +136,6 @@ void Sleep(uint32_t time)
     return;
 }
 
-static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, const char *name)
-{
-    // return;
-    while (true) {
-        printf("\nWatchdogTimeout: %p %s\n", taskId, name);
-        Sleep(1000);
-    }
-}
-
 #define MAX_THREADS 4
 
 class IdleNode {
@@ -199,7 +190,6 @@ static Coroutine_Events events = {
         sched_yield();
         return;
     },
-    nullptr,
     [](uint32_t time, void *object) -> void {
         int idx = Coroutine.GetCurrentCoroutineIdx();
         idle_node[idx]->Idle(time);
@@ -209,11 +199,20 @@ static Coroutine_Events events = {
         idle_node[co_id]->WeakUp();
         return;
     },
-    Coroutine_WatchdogTimeout,
-    [](void *object, Coroutine_TaskId taskId, const char *name) -> void {
-        printf("Stack Error: %p %s\n", taskId, name);
+    [](void                      *object,
+       int                        line,
+       Coroutine_ErrEvent_t       event,
+       const Coroutine_ErrPars_t *pars) -> void {
+        printf("Coroutine Error: %d\n", event);
+        switch (event) {
+            case CO_ERR_WATCHDOG_TIMEOUT:
+                break;
+            default:
+                break;
+        }
         while (true)
             Sleep(1000);
+        return;
     },
 };
 
