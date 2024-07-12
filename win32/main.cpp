@@ -34,7 +34,7 @@ void Task1(void *obj)
     int   i       = 0;
     char *str_buf = new char[4 * 1024];
     while (true) {
-        // Coroutine.FeedDog(30 * 1000);
+        Coroutine.FeedDog(30 * 1000);
         PrintMemory();
         std::string str = "hello";
         int         ms  = (rand() % 550) + 250;
@@ -251,12 +251,14 @@ static void Task10(void)
     auto ch      = new CO::Channel<int>("ch2");
     auto ch_func = [](CO::Channel<int> *ch) -> void {
         while (true) {
+            Coroutine.FeedDog(30 * 1000);
             int num = ch->Read();
             ch->Write(num + 1);
         }
     };
     CO::Task::Start("ch_func", ch_func, ch);
     while (true) {
+        Coroutine.FeedDog(30 * 1000);
         uint64_t ts = Coroutine.GetMillisecond();
         uint32_t ms = rand() % 2000 + 0;
         int      a = rand(), b = rand();

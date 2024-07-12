@@ -324,6 +324,22 @@ volatile static func_setjmp_t _c_setjmp = setjmp;
         _ERROR_CALL(CO_ERR_WATCHDOG_TIMEOUT, pars);            \
     } while (false)
 
+// 信号量删除错误
+#define ERROR_SEM_DELETE(_sem)                      \
+    do {                                            \
+        Coroutine_ErrPars_t pars;                   \
+        pars.sem_delete.sem = _sem;                 \
+        _ERROR_CALL(CO_ERR_WATCHDOG_TIMEOUT, pars); \
+    } while (false)
+
+// CO_ERR_MUTEX_DELETE
+#define ERROR_MUTEX_DELETE(_mutex)              \
+    do {                                        \
+        Coroutine_ErrPars_t pars;               \
+        pars.mutex_delete.mutex = _mutex;       \
+        _ERROR_CALL(CO_ERR_MUTEX_DELETE, pars); \
+    } while (false)
+
 // 检查栈哨兵
 #define CHECK_STACK_SENTRY(n)                                                                    \
     if (n->stack[0] != STACK_SENTRY_END || n->stack[n->stack_alloc - 1] != STACK_SENTRY_START) { \
@@ -1532,6 +1548,8 @@ static void DeleteSemaphore(Coroutine_Semaphore _sem)
     CO_Semaphore *sem = (CO_Semaphore *)_sem;
     if (sem == nullptr)
         return;
+    if (!CM_NodeLink_IsEmpty(sem->list))
+        ERROR_SEM_DELETE(sem);
     CO_EnterCriticalSection();
     // 移出列表
     CM_NodeLink_Remove(&C_Static.semaphores, &sem->link);
@@ -1679,6 +1697,8 @@ static void DeleteMutex(Coroutine_Mutex mutex)
 {
     if (mutex == nullptr)
         return;
+    if (!CM_NodeLink_IsEmpty(mutex->list))
+        ERROR_MUTEX_DELETE(mutex);
     // 移除列表
     CO_EnterCriticalSection();
     CM_NodeLink_Remove(&C_Static.mutexes, &mutex->link);
@@ -1947,7 +1967,7 @@ static bool ASyncWait(Coroutine_ASync async, uint32_t timeout)
         return false;
     if (async->func == nullptr)
         return true;
-    if(Coroutine.WaitSemaphore(async->sem, 1, timeout))
+    if (Coroutine.WaitSemaphore(async->sem, 1, timeout))
         async->func = nullptr;   // 设置执行完成标志
     return async->func == nullptr;
 }
@@ -1961,6 +1981,7 @@ static void *ASyncGetResultAndDelete(Coroutine_ASync async_ptr)
         return nullptr;   // 还没执行完
     void *ret = p->ret;
     Coroutine.DeleteSemaphore(p->sem);
+    printf("free sem = %p\n", p->sem);
     Inter.Free(p, __FILE__, __LINE__);
     return ret;
 }
@@ -1985,6 +2006,16 @@ static void FeedDog(uint32_t time)
     CO_EnterCriticalSection();
     // 从已有的列表中删除
     CM_RBTree_Remove(&C_Static.watchdogs, &task->watchdog->link);
+    if (C_Static.idx_watchdog == task)
+    {
+        if (!CM_RBTree_IsEmpty(&C_Static.watchdogs))
+        {
+            WatchdogNode* n = CM_Field_ToType(WatchdogNode, link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
+            C_Static.idx_watchdog = n == nullptr ? nullptr : n->task;
+        }
+        else
+            C_Static.idx_watchdog = nullptr;
+    }
     // 设置超时时间
     if (time == 0)
         task->watchdog->expiration_time = 0;
@@ -1996,9 +2027,6 @@ static void FeedDog(uint32_t time)
         if (C_Static.idx_watchdog == nullptr ||
             task->watchdog->expiration_time < C_Static.idx_watchdog->watchdog->expiration_time)
             C_Static.idx_watchdog = task;
-    } else {
-        WatchdogNode *n       = CM_Field_ToType(WatchdogNode, link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
-        C_Static.idx_watchdog = n == nullptr ? nullptr : n->task;
     }
     CO_LeaveCriticalSection();
     return;

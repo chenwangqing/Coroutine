@@ -89,6 +89,10 @@ extern "C" {
 #ifndef COROUTINE_CHECK_STACK
 #define COROUTINE_CHECK_STACK 0
 #endif
+// 临界区保护
+#ifndef COROUTINE_BLOCK_CRITICAL_SECTION
+#define COROUTINE_BLOCK_CRITICAL_SECTION 1   // 0: 全局临界区保护，1: 分块临界区保护
+#endif
 // 启用邮箱
 #ifndef COROUTINE_ENABLE_MAILBOX
 #define COROUTINE_ENABLE_MAILBOX 1
@@ -124,13 +128,13 @@ extern "C" {
 
 #define COROUTINE_VERSION "1.20"
 
-typedef struct _CO_Thread    *Coroutine_Handle;      // 协程实例
-typedef struct _CO_TCB       *Coroutine_TaskId;      // 任务id
+typedef struct _CO_Thread *   Coroutine_Handle;      // 协程实例
+typedef struct _CO_TCB *      Coroutine_TaskId;      // 任务id
 typedef struct _CO_Semaphore *Coroutine_Semaphore;   // 信号量
-typedef struct _CO_Mailbox   *Coroutine_Mailbox;     // 邮箱
-typedef struct _CO_ASync     *Coroutine_ASync;       // 异步任务
-typedef struct _CO_Mutex     *Coroutine_Mutex;       // 互斥锁(可递归)
-typedef struct _CO_Channel   *Coroutine_Channel;     // 管道(！！！不能在协程以外的地方使用！！！)
+typedef struct _CO_Mailbox *  Coroutine_Mailbox;     // 邮箱
+typedef struct _CO_ASync *    Coroutine_ASync;       // 异步任务
+typedef struct _CO_Mutex *    Coroutine_Mutex;       // 互斥锁(可递归)
+typedef struct _CO_Channel *  Coroutine_Channel;     // 管道(！！！不能在协程以外的地方使用！！！)
 
 typedef enum
 {
@@ -138,6 +142,8 @@ typedef enum
     CO_ERR_STACK_OVERFLOW   = 1,   // 栈溢出
     CO_ERR_MUTEX_RELIEVE    = 2,   // 互斥锁释放错误
     CO_ERR_MEMORY_ALLOC     = 3,   // 内存分配失败
+    CO_ERR_SEM_DELETE       = 4,   // 信号量删除错误 有任务正在等待
+    CO_ERR_MUTEX_DELETE     = 5,   // 互斥锁删除错误 有任务正在等待
 } Coroutine_ErrEvent_t;
 
 /**
@@ -171,6 +177,16 @@ typedef union
         const char *file;   // 错误发生文件
         size_t      size;   // 内存大小
     } memory_alloc;
+    // CO_ERR_SEM_DELETE
+    struct
+    {
+        Coroutine_Semaphore sem;
+    } sem_delete;
+    // CO_ERR_MUTEX_DELETE
+    struct
+    {
+        Coroutine_Mutex mutex;
+    } mutex_delete;
 } Coroutine_ErrPars_t;
 
 // 任务回调
@@ -184,7 +200,7 @@ typedef void (*Coroutine_Wake_Event)(uint16_t co_id, void *object);
 // 异步任务
 typedef void *(*Coroutine_AsyncTask)(void *arg);
 // 错误事件
-typedef void (*Coroutine_Error_Event)(void                      *object, /* 用户对象 */
+typedef void (*Coroutine_Error_Event)(void *                     object, /* 用户对象 */
                                       int                        line,   /* 事件发生行 */
                                       Coroutine_ErrEvent_t       event,  /* 事件类型 */
                                       const Coroutine_ErrPars_t *pars    /* 事件参数 */
@@ -197,7 +213,7 @@ typedef void (*Coroutine_Error_Event)(void                      *object, /* 用�
  */
 typedef struct
 {
-    void                  *object;   // 用户对象
+    void *                 object;   // 用户对象
     Coroutine_Period_Event Period;   // 周期事件
     Coroutine_Idle_Event   Idle;     // 空闲事件
     Coroutine_Wake_Event   wake;     // 唤醒事件
@@ -302,8 +318,8 @@ typedef struct
      * @date     2022-08-15
      */
     Coroutine_TaskId (*AddTask)(Coroutine_Task                 func,
-                                void                          *pars,
-                                const char                    *name,
+                                void *                         pars,
+                                const char *                   name,
                                 const Coroutine_TaskAttribute *attr);
 
     /**
@@ -521,7 +537,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-09-19
      */
-    void (*Free)(void       *ptr,
+    void (*Free)(void *      ptr,
                  const char *file,
                  int         line);
 
