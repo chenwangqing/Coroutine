@@ -181,7 +181,7 @@ struct _CO_Thread
 
 #if COROUTINE_ENABLE_PRINT_INFO
     uint64_t start_time;   // 启动时间
-    uint64_t run_time;     // 运行时间
+    uint64_t sleep_time;   // 休眠时间
 #endif
 
     CM_NodeLinkList_t tasks_run[MAX_PRIORITY_NUM];   // 运行任务列表 CO_TCB，根据优先级
@@ -690,6 +690,9 @@ static void _Task(CO_Thread *coroutine)
     if (n == nullptr) {
         // 运行空闲任务
         if (sleep_ms > 1 && Inter.events->Idle != nullptr) {
+#if COROUTINE_ENABLE_PRINT_INFO
+            uint64_t now = Inter.GetMillisecond();
+#endif
             CO_EnterCriticalSection();
             coroutine->isSleep = 1;   // 设置休眠状态
             C_Static.sleep_thread_count++;
@@ -699,6 +702,10 @@ static void _Task(CO_Thread *coroutine)
             coroutine->isSleep = 0;   // 清除休眠状态
             C_Static.sleep_thread_count--;
             CO_LeaveCriticalSection();
+#if COROUTINE_ENABLE_PRINT_INFO
+            now = Inter.GetMillisecond() - now;
+            coroutine->sleep_time += now;
+#endif
         }
         return;
     }
@@ -709,7 +716,6 @@ static void _Task(CO_Thread *coroutine)
     uint64_t ts = Inter.GetMillisecond();
     uint64_t tv = ts <= coroutine->task_start_time ? 0 : ts - coroutine->task_start_time;
     if (tv) {
-        coroutine->run_time += tv;
         n->run_time += tv;
     }
 #endif
@@ -1456,8 +1462,9 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     CO_EnterCriticalSection();
     // 统计总的运行时间
     uint64_t run_time = 0;
+    uint64_t now      = Inter.GetMillisecond();
     for (size_t i = 0; i < Inter.thread_count; i++)
-        run_time += C_Static.coroutines[i]->run_time;
+        run_time += now - C_Static.coroutines[i]->start_time - C_Static.coroutines[i]->sleep_time;
     if (run_time == 0) run_time = 1;
     // 获取打印标志
     bool isPrint = false;
@@ -1492,7 +1499,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         if (tv == 0)
             tv = 1;
         CO_EnterCriticalSection();
-        uint64_t run_time = coroutine->run_time;
+        uint64_t run_time = tv - coroutine->sleep_time;
         CO_LeaveCriticalSection();
         int a = run_time * 1000 / tv;
         idx += co_snprintf(buf + idx,
