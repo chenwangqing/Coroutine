@@ -55,5 +55,4 @@
         "coroutine.h": "c",
         "stdint.h": "c"
     },
-    "cmake.sourceDirectory": "/home/work/Coroutine/linux"
 }

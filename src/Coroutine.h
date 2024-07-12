@@ -25,7 +25,7 @@
  * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
  * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- * 
+ *
  * @par 修改日志:
  * <table>
  * <tr><th>日期       <th>版本    <th>作者    <th>说明
@@ -124,13 +124,13 @@ extern "C" {
 
 #define COROUTINE_VERSION "1.20"
 
-typedef struct _CO_Thread *   Coroutine_Handle;      // 协程实例
-typedef struct _CO_TCB *      Coroutine_TaskId;      // 任务id
+typedef struct _CO_Thread    *Coroutine_Handle;      // 协程实例
+typedef struct _CO_TCB       *Coroutine_TaskId;      // 任务id
 typedef struct _CO_Semaphore *Coroutine_Semaphore;   // 信号量
-typedef struct _CO_Mailbox *  Coroutine_Mailbox;     // 邮箱
-typedef struct _CO_ASync *    Coroutine_ASync;       // 异步任务
-typedef struct _CO_Mutex *    Coroutine_Mutex;       // 互斥锁(可递归)
-typedef struct _CO_Channel *  Coroutine_Channel;     // 管道(！！！不能在协程以外的地方使用！！！)
+typedef struct _CO_Mailbox   *Coroutine_Mailbox;     // 邮箱
+typedef struct _CO_ASync     *Coroutine_ASync;       // 异步任务
+typedef struct _CO_Mutex     *Coroutine_Mutex;       // 互斥锁(可递归)
+typedef struct _CO_Channel   *Coroutine_Channel;     // 管道(！！！不能在协程以外的地方使用！！！)
 
 typedef enum
 {
@@ -184,7 +184,7 @@ typedef void (*Coroutine_Wake_Event)(uint16_t co_id, void *object);
 // 异步任务
 typedef void *(*Coroutine_AsyncTask)(void *arg);
 // 错误事件
-typedef void (*Coroutine_Error_Event)(void *                     object, /* 用户对象 */
+typedef void (*Coroutine_Error_Event)(void                      *object, /* 用户对象 */
                                       int                        line,   /* 事件发生行 */
                                       Coroutine_ErrEvent_t       event,  /* 事件类型 */
                                       const Coroutine_ErrPars_t *pars    /* 事件参数 */
@@ -197,7 +197,7 @@ typedef void (*Coroutine_Error_Event)(void *                     object, /* 用�
  */
 typedef struct
 {
-    void *                 object;   // 用户对象
+    void                  *object;   // 用户对象
     Coroutine_Period_Event Period;   // 周期事件
     Coroutine_Idle_Event   Idle;     // 空闲事件
     Coroutine_Wake_Event   wake;     // 唤醒事件
@@ -263,7 +263,7 @@ typedef struct
 
 typedef struct
 {
-    uint64_t id;     // 邮件大小
+    uint64_t id;     // 邮件id
     uint64_t data;   // 邮件数据
     uint32_t size;   // 邮件长度
     bool     isOk;   // 获取成功
@@ -302,8 +302,8 @@ typedef struct
      * @date     2022-08-15
      */
     Coroutine_TaskId (*AddTask)(Coroutine_Task                 func,
-                                void *                         pars,
-                                const char *                   name,
+                                void                          *pars,
+                                const char                    *name,
                                 const Coroutine_TaskAttribute *attr);
 
     /**
@@ -373,7 +373,7 @@ typedef struct
     void (*DeleteMailbox)(Coroutine_Mailbox mb);
 
     /**
-     * @brief    发送邮件
+     * @brief    发送邮件【不会阻塞】
      * @param    mb             邮箱
      * @param    id             邮件id
      * @param    data           邮件消息
@@ -411,7 +411,7 @@ typedef struct
      *  SN   TaskId   Func    Pri                 Status Stack                Runtime       WaitTime   DogTime    Name
      * 序号  任务id   函数地址 当前优先级|初始优先级 状态 栈大小/栈最大/栈分配 运行时间(ms) 等待时间(ms) 看门狗时间(ms) 名称
      *   1 00C91124 007D115E  2|2                 MW   1128/1128/16384      14(51%)       58         29958      Task3
-     * Status：RUN: 正在运行 SLR: 休眠/就绪 MAI: 等待邮件 SEM: 等待信号 MUT: 等待互斥 CHL: 等待通道 DEL: 死亡 
+     * Status：RUN: 正在运行 SLR: 休眠/就绪 MAI: 等待邮件 SEM: 等待信号 MUT: 等待互斥 CHL: 等待通道 DEL: 死亡
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-08-16
      */
@@ -521,7 +521,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-09-19
      */
-    void (*Free)(void *      ptr,
+    void (*Free)(void       *ptr,
                  const char *file,
                  int         line);
 
@@ -615,7 +615,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-07-10
      */
-    bool (*WriteChannel)(Coroutine_Channel ch, size_t data, uint32_t timeout);
+    bool (*WriteChannel)(Coroutine_Channel ch, uint64_t data, uint32_t timeout);
 
     /**
      * @brief    读取通道数据(！！！不能在协程以外的地方使用！！！)
@@ -626,7 +626,7 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-07-10
      */
-    bool (*ReadChannel)(Coroutine_Channel ch, size_t *data, uint32_t timeout);
+    bool (*ReadChannel)(Coroutine_Channel ch, uint64_t *data, uint32_t timeout);
 #endif
 } _Coroutine;
 

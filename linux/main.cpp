@@ -198,7 +198,7 @@ static void Task8(void *obj)
 
 static void Task_Channel1(void *obj)
 {
-    size_t   num = 0;
+    uint64_t num = 0;
     uint64_t now = Coroutine.GetMillisecond();
     while (true) {
         Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);
@@ -213,7 +213,7 @@ static void Task_Channel1(void *obj)
 
 static void Task_Channel2(void *obj)
 {
-    size_t num = 0;
+    uint64_t num = 0;
     while (true) {
         Coroutine.ReadChannel(ch1, &num, UINT32_MAX);
         Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);

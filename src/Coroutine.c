@@ -217,14 +217,14 @@ struct _CO_ASync
 struct _CO_Channel_Wait_Node
 {
     bool          isOk;   // 等待成功
-    size_t        data;   // 数据
+    uint64_t      data;   // 数据
     CO_TCB *      task;   // 等待任务
     CM_NodeLink_t link;   // ChannelWaitNode
 };
 
 struct _CO_Channel_Data_Node
 {
-    size_t        data;
+    uint64_t      data;
     CM_NodeLink_t link;
 };
 
@@ -256,7 +256,8 @@ static struct
     CM_NodeLinkList_t standalone_tasks_run[MAX_PRIORITY_NUM];   // 独立栈 运行任务列表 CO_TCB，根据优先级
     uint32_t          wait_run_standalone_task_count;           // 等待运行任务数量
 #endif
-    uint32_t def_stack_size;   // 默认栈大小
+    uint32_t def_stack_size;    // 默认栈大小
+    bool     isThreadAllocOk;   // 线程分配是否完成
 } C_Static;
 
 #define CO_EnterCriticalSection() Inter.EnterCriticalSection(__FILE__, __LINE__)
@@ -559,7 +560,8 @@ static void CheckWatchdog(void)
     CO_TCB *t                    = C_Static.idx_watchdog;
     if (t->watchdog && t->watchdog->expiration_time < Inter.GetMillisecond()) {
         // 看门狗超时
-        ERROR_WATCHDOG_TIMEOUT(t);
+        // ERROR_WATCHDOG_TIMEOUT(t);
+        C_Static.check_watchdog_time = 0;
     }
     return;
 }
@@ -782,22 +784,26 @@ static CO_Thread *GetCurrentThread(int co_idx)
         if (co_idx < 0) {
             size_t id  = Inter.GetThreadId();
             size_t _id = id % 65537;
-            CO_EnterCriticalSection();
             for (size_t i = 0; i < Inter.thread_count; i++) {
                 idx = (_id + i) % Inter.thread_count;
                 if (C_Static.coroutines[idx]->ThreadId == id) {
                     ret = C_Static.coroutines[idx];
                     break;
-                } else if (C_Static.coroutines[idx]->ThreadId == (size_t)-1) {
-                    // 分配控制器
-                    ret           = C_Static.coroutines[idx];
-                    ret->ThreadId = id;
-                    break;
+                } else if (!C_Static.isThreadAllocOk) {
+                    CO_EnterCriticalSection();
+                    if (C_Static.coroutines[idx]->ThreadId == (size_t)-1) {
+                        // 分配控制器
+                        ret           = C_Static.coroutines[idx];
+                        ret->ThreadId = id;
+                        if (i + 1 == Inter.thread_count)
+                            C_Static.isThreadAllocOk = true;   // 全部分配完毕
+                        CO_LeaveCriticalSection();
+                        break;
+                    }
+                    CO_LeaveCriticalSection();
                 }
             }
-            CO_LeaveCriticalSection();
         } else {
-            CO_EnterCriticalSection();
             CM_NodeLink_Foreach_Positive(CO_Thread, link, C_Static.threads, p)
             {
                 if (p->co_id == co_idx) {
@@ -805,7 +811,6 @@ static CO_Thread *GetCurrentThread(int co_idx)
                     break;
                 }
             }
-            CO_LeaveCriticalSection();
         }
     }
     return ret;
@@ -1904,7 +1909,6 @@ static void _ASyncTask(void *obj)
     Coroutine_ASync a = (Coroutine_ASync)obj;
     if (a->func)
         a->ret = a->func(a->object);
-    a->func = nullptr;   // 设置执行完成标志
     Coroutine.GiveSemaphore(a->sem, 1);
     return;
 }
@@ -1943,7 +1947,8 @@ static bool ASyncWait(Coroutine_ASync async, uint32_t timeout)
         return false;
     if (async->func == nullptr)
         return true;
-    Coroutine.WaitSemaphore(async->sem, 1, timeout);
+    if(Coroutine.WaitSemaphore(async->sem, 1, timeout))
+        async->func = nullptr;   // 设置执行完成标志
     return async->func == nullptr;
 }
 
@@ -2045,7 +2050,7 @@ static void DeleteChannel(Coroutine_Channel ch)
     return;
 }
 
-static bool WriteChannel(Coroutine_Channel ch, size_t data, uint32_t timeout)
+static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
 {
     if (ch == nullptr)
         return false;
@@ -2114,7 +2119,7 @@ static bool WriteChannel(Coroutine_Channel ch, size_t data, uint32_t timeout)
     return isOk;
 }
 
-static bool ReadChannel(Coroutine_Channel ch, size_t *data, uint32_t timeout)
+static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
 {
     if (ch == nullptr || data == nullptr)
         return false;

@@ -3,8 +3,11 @@
 
 #include <iostream>
 #include "Coroutine.h"
+#include "Coroutine.hpp"
 #include <string>
 #include <windows.h>
+#include <functional>
+#include <thread>
 
 #undef CreateSemaphore
 #undef CreateMutex
@@ -41,7 +44,7 @@ void Task1(void *obj)
 #if 01
         char *buf = (char *)Coroutine.Malloc(str.size() + 1, __FILE__, __LINE__);
         memcpy(buf, str.c_str(), str.size() + 1);
-        if (!Coroutine.SendMail(mail1, i & 0xFF, (uint64_t)buf, str.size() + 1,1000))
+        if (!Coroutine.SendMail(mail1, i & 0xFF, (uint64_t)buf, str.size() + 1, 1000))
             Coroutine.Free(buf, __FILE__, __LINE__);
 #endif
 #if EN_SLEEP
@@ -205,7 +208,7 @@ DWORD WINAPI ThreadProc_test2(LPVOID lpParam)
 
 static void Task_Channel1(void *obj)
 {
-    size_t   num = 0;
+    uint64_t num = 0;
     uint64_t now = Coroutine.GetMillisecond();
     while (true) {
         Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);
@@ -220,7 +223,7 @@ static void Task_Channel1(void *obj)
 
 static void Task_Channel2(void *obj)
 {
-    size_t num = 0;
+    uint64_t num = 0;
     while (true) {
         Coroutine.ReadChannel(ch1, &num, UINT32_MAX);
         Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);
@@ -240,6 +243,41 @@ DWORD WINAPI ThreadProc(LPVOID lpParam)
     while (true)
         Coroutine.RunTick();
     return 0;
+}
+
+static void Task10(void)
+{
+    int  num     = 0;
+    auto ch      = new CO::Channel<int>("ch2");
+    auto ch_func = [](CO::Channel<int> *ch) -> void {
+        while (true) {
+            int num = ch->Read();
+            ch->Write(num + 1);
+        }
+    };
+    CO::Task::Start("ch_func", ch_func, ch);
+    while (true) {
+        uint64_t ts = Coroutine.GetMillisecond();
+        uint32_t ms = rand() % 2000 + 0;
+        int      a = rand(), b = rand();
+        CO::Task::Sleep(ms);
+        ts        = Coroutine.GetMillisecond() - ts;
+        auto func = [](int a, int b) -> int {
+            return a + b;
+        };
+        CO::Async<int> tmp(0, func, a, b);
+        ch->Write(num + 1);
+        tmp.Wait();
+        num = ch->Read();
+        printf("[%llu][10]sleep %llu/%d %d + %d = %d num = %d\n",
+               Coroutine.GetMillisecond(),
+               ts,
+               ms,
+               a,
+               b,
+               tmp.GetResult(),
+               num);
+    }
 }
 
 int main()
@@ -287,7 +325,10 @@ int main()
 
     Coroutine.AddTask(Task_Channel1, nullptr, "Channel1", &atr);
     Coroutine.AddTask(Task_Channel2, nullptr, "Channel2", &atr);
-    
+
+    CO::Task::SetDefaultTaskStackSize(16 << 10);
+    CO::Task::Start("Task10", Task10);
+
     //  CreateThread(NULL, 0, ThreadProc_test, NULL, 0, NULL);
     CreateThread(NULL, 0, ThreadProc_test2, NULL, 0, NULL);
     while (true) {
