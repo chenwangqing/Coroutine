@@ -91,7 +91,7 @@ extern "C" {
 #endif
 // 临界区保护
 #ifndef COROUTINE_BLOCK_CRITICAL_SECTION
-#define COROUTINE_BLOCK_CRITICAL_SECTION 1   // 0: 全局临界区保护，1: 分块临界区保护
+#define COROUTINE_BLOCK_CRITICAL_SECTION 1   // 0: 全局临界区保护（临界区会重入），1: 分块临界区保护
 #endif
 // 启用邮箱
 #ifndef COROUTINE_ENABLE_MAILBOX

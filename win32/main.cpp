@@ -210,12 +210,15 @@ static void Task_Channel1(void *obj)
 {
     uint64_t num = 0;
     uint64_t now = Coroutine.GetMillisecond();
+    uint64_t total = 0, count = 0;
     while (true) {
         Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);
         Coroutine.ReadChannel(ch1, &num, UINT32_MAX);
         if (Coroutine.GetMillisecond() - now >= 1000) {
             now = Coroutine.GetMillisecond();
-            printf("[%llu][ch]num = %llu\n", Coroutine.GetMillisecond(), (uint64_t)num);
+            total += num;
+            count++;
+            printf("[%llu][ch]num = %llu Avg = %llu\n", Coroutine.GetMillisecond(), (uint64_t)num, total / count);
             num = 0;
         }
     }

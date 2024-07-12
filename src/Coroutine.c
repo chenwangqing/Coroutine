@@ -265,8 +265,9 @@ static struct
     CM_NodeLinkList_t standalone_tasks_run[MAX_PRIORITY_NUM];   // 独立栈 运行任务列表 CO_TCB，根据优先级
     uint32_t          wait_run_standalone_task_count;           // 等待运行任务数量
 #endif
-    uint32_t def_stack_size;    // 默认栈大小
-    bool     isThreadAllocOk;   // 线程分配是否完成
+    uint32_t def_stack_size;       // 默认栈大小
+    uint32_t sleep_thread_count;   // 休眠线程数量
+    bool     isThreadAllocOk;      // 线程分配是否完成
 } C_Static;
 
 #define CO_EnterCriticalSection() Inter.EnterCriticalSection(__FILE__, __LINE__)
@@ -355,57 +356,6 @@ volatile static func_setjmp_t _c_setjmp = setjmp;
         ERROR_STACK(n, 0);                                                                       \
     }
 
-/**
- * @brief    进入临界区(不可重入)
- * @param    cs             
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2024-07-12
- */
-static void CO_ENTER(CO_CS *cs)
-{
-#if COROUTINE_BLOCK_CRITICAL_SECTION
-    size_t id   = Inter.GetThreadId();
-    bool   isOk = false;
-    while (!isOk) {
-        CO_EnterCriticalSection();
-        if (*cs == 0) {
-            *cs  = id;
-            isOk = true;
-        }
-        CO_LeaveCriticalSection();
-        if (!isOk && Inter.events->Period)
-            Inter.events->Period(Inter.events->object);
-    }
-#else
-    CO_EnterCriticalSection();
-#endif
-    return;
-}
-
-/**
- * @brief    离开临界区(不可重入)
- * @param    cs             
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2024-07-12
- */
-static void CO_LEAVE(CO_CS *cs)
-{
-#if COROUTINE_BLOCK_CRITICAL_SECTION
-    size_t id = Inter.GetThreadId();
-    CO_EnterCriticalSection();
-    if (*cs == id)
-        *cs = 0;
-    else {
-        while (true)   // Debug
-            ;
-    }
-    CO_LeaveCriticalSection();
-#else
-    CO_LeaveCriticalSection();
-#endif
-    return;
-}
-
 // --------------------------------------------------------------------------------------
 //                              |       内核调度        |
 // --------------------------------------------------------------------------------------
@@ -447,7 +397,7 @@ static CO_Thread *GetSleepThread(void)
     if (Inter.thread_count == 1)
         return C_Static.coroutines[0];
     int idx = rand() % Inter.thread_count;
-    for (size_t i = 0; i < Inter.thread_count; i++) {
+    for (size_t i = 0; i < Inter.thread_count && C_Static.sleep_thread_count; i++) {
         if (C_Static.coroutines[idx]->isSleep) {
             C_Static.coroutines[idx]->isSleep = 0;
             break;
@@ -546,7 +496,7 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
             task->isAddRunStandaloneList = 1;
             C_Static.wait_run_standalone_task_count++;
             // 唤醒线程
-            if (Inter.events->wake)
+            if (C_Static.sleep_thread_count && Inter.events->wake)
                 Inter.events->wake(GetSleepThread()->co_id, Inter.events->object);
         }
     } else {
@@ -742,10 +692,12 @@ static void _Task(CO_Thread *coroutine)
         if (sleep_ms > 1 && Inter.events->Idle != nullptr) {
             CO_EnterCriticalSection();
             coroutine->isSleep = 1;   // 设置休眠状态
+            C_Static.sleep_thread_count++;
             CO_LeaveCriticalSection();
             Inter.events->Idle(sleep_ms - 1, Inter.events->object);
             CO_EnterCriticalSection();
             coroutine->isSleep = 0;   // 清除休眠状态
+            C_Static.sleep_thread_count--;
             CO_LeaveCriticalSection();
         }
         return;
@@ -842,6 +794,59 @@ static void _Yield(void)
         return;
     // 保存堆栈数据
     ContextSwitch(coroutine->idx_task, coroutine);
+    return;
+}
+
+/**
+ * @brief    进入临界区(非内核，不可重入)
+ * @param    cs             
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-12
+ */
+static void CO_ENTER(CO_CS *cs)
+{
+#if COROUTINE_BLOCK_CRITICAL_SECTION
+    size_t id   = Inter.GetThreadId();
+    bool   isOk = false;
+    while (!isOk) {
+        CO_EnterCriticalSection();
+        if (*cs == 0) {
+            *cs  = id;
+            isOk = true;
+        }
+        CO_LeaveCriticalSection();
+        if (!isOk) {
+            _Yield();                   // 等待其他线程释放临界区
+            id = Inter.GetThreadId();   // 获取新线程id
+        }
+    }
+#else
+    CO_EnterCriticalSection();
+#endif
+    return;
+}
+
+/**
+ * @brief    离开临界区(不可重入)
+ * @param    cs             
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-12
+ */
+static void CO_LEAVE(CO_CS *cs)
+{
+#if COROUTINE_BLOCK_CRITICAL_SECTION
+    size_t id = Inter.GetThreadId();
+    CO_EnterCriticalSection();
+    if (*cs == id)
+        *cs = 0;
+    else {
+        while (true)   // Debug
+            ;
+    }
+    CO_LeaveCriticalSection();
+#else
+    CO_LeaveCriticalSection();
+#endif
     return;
 }
 
