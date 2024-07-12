@@ -32,6 +32,7 @@ typedef struct _CO_Mutex             CO_Mutex;          // 互斥锁
 typedef struct _CO_Channel           CO_Channel;        // 管道
 typedef struct _CO_Channel_Wait_Node ChannelWaitNode;   // 管道等待节点
 typedef struct _CO_Channel_Data_Node ChannelDataNode;   // 管道数据节点
+typedef volatile size_t              CO_CS;             // 临界区
 
 /**
  * @brief    信号节点
@@ -87,6 +88,7 @@ struct _CO_Semaphore
     uint32_t          value;        // 信号值
     uint32_t          wait_count;   // 等待数
     CM_NodeLink_t     link;         // _CO_Semaphore
+    CO_CS             cs;           // 临界区
 };
 
 struct _CO_Mutex
@@ -98,6 +100,7 @@ struct _CO_Mutex
     uint32_t          max_wait_time;   // 最大等待时间
     CM_NodeLink_t     link;            // _CO_Mutex
     CO_TCB *          owner;           // 持有者
+    CO_CS             cs;              // 临界区
 };
 
 struct _CO_Mutex_Wait_Node
@@ -204,6 +207,7 @@ struct _CO_Mailbox
     CM_NodeLinkList_t mails;        // 邮件列表
     CM_NodeLinkList_t waits;        // 等待列表 MailWaitNode
     CM_NodeLink_t     link;         // _CO_Mailbox
+    CO_CS             cs;           // 临界区
 };
 
 struct _CO_ASync
@@ -236,6 +240,7 @@ struct _CO_Channel
     CM_NodeLinkList_t caches;     // 缓存列表 ChannelDataNode
     CM_NodeLinkList_t senders;    // 发送者列表 ChannelWaitNode
     CM_NodeLink_t     link;       // CO_Channel
+    CO_CS             cs;         // 临界区
 };
 
 static Coroutine_Inter Inter;   // 外部接口
@@ -244,12 +249,16 @@ static struct
 {
     CM_NodeLinkList_t threads;               // 协程控制器列表
     CM_NodeLinkList_t semaphores;            // 信号列表
+    CO_CS             cs_semaphores;         // 临界区
     CM_NodeLinkList_t mailboxes;             // 邮箱列表
+    CO_CS             cs_mailboxes;          // 临界区
     CM_NodeLinkList_t mutexes;               // 互斥列表 _CO_Mutex
+    CO_CS             cs_mutexes;            // 临界区
     CM_NodeLinkList_t task_list;             // 任务列表
     CM_NodeLinkList_t channels;              // 管道列表
     CO_Thread **      coroutines;            // 协程控制器
     CM_RBTree_t       watchdogs;             // 看门狗列表 WatchdogNode 从小到大
+    CO_CS             cs_watchdogs;          // 临界区
     CO_TCB *          idx_watchdog;          // 当前看门狗
     uint64_t          check_watchdog_time;   // 看门狗检查时间
 #if !COROUTINE_ONLY_SHARED_STACK
@@ -346,6 +355,57 @@ volatile static func_setjmp_t _c_setjmp = setjmp;
         ERROR_STACK(n, 0);                                                                       \
     }
 
+/**
+ * @brief    进入临界区(不可重入)
+ * @param    cs             
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-12
+ */
+static void CO_ENTER(CO_CS *cs)
+{
+#if COROUTINE_BLOCK_CRITICAL_SECTION
+    size_t id   = Inter.GetThreadId();
+    bool   isOk = false;
+    while (!isOk) {
+        CO_EnterCriticalSection();
+        if (*cs == 0) {
+            *cs  = id;
+            isOk = true;
+        }
+        CO_LeaveCriticalSection();
+        if (!isOk && Inter.events->Period)
+            Inter.events->Period(Inter.events->object);
+    }
+#else
+    CO_EnterCriticalSection();
+#endif
+    return;
+}
+
+/**
+ * @brief    离开临界区(不可重入)
+ * @param    cs             
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-12
+ */
+static void CO_LEAVE(CO_CS *cs)
+{
+#if COROUTINE_BLOCK_CRITICAL_SECTION
+    size_t id = Inter.GetThreadId();
+    CO_EnterCriticalSection();
+    if (*cs == id)
+        *cs = 0;
+    else {
+        while (true)   // Debug
+            ;
+    }
+    CO_LeaveCriticalSection();
+#else
+    CO_LeaveCriticalSection();
+#endif
+    return;
+}
+
 // --------------------------------------------------------------------------------------
 //                              |       内核调度        |
 // --------------------------------------------------------------------------------------
@@ -377,6 +437,27 @@ static void CheckStack(volatile CO_TCB *t)
 #endif
 
 /**
+ * @brief    获取可能休眠的线程
+ * @return   * CO_Thread*
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-04
+ */
+static CO_Thread *GetSleepThread(void)
+{
+    if (Inter.thread_count == 1)
+        return C_Static.coroutines[0];
+    int idx = rand() % Inter.thread_count;
+    for (size_t i = 0; i < Inter.thread_count; i++) {
+        if (C_Static.coroutines[idx]->isSleep) {
+            C_Static.coroutines[idx]->isSleep = 0;
+            break;
+        }
+        idx = (idx + 1) % Inter.thread_count;
+    }
+    return C_Static.coroutines[idx];
+}
+
+/**
  * @brief    删除任务
  * @param    inter
  * @param    t
@@ -387,11 +468,13 @@ static void DeleteTask(CO_TCB *t)
 {
     // 移除看门狗
     if (t->watchdog && t->watchdog->expiration_time) {
+        // CO_ENTER(&C_Static.cs_watchdogs);
         CM_RBTree_Remove(&C_Static.watchdogs, &t->watchdog->link);
         if (C_Static.idx_watchdog == t) {
             WatchdogNode *n       = CM_Field_ToType(WatchdogNode, link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
             C_Static.idx_watchdog = n == nullptr ? nullptr : n->task;
         }
+        // CO_LEAVE(&C_Static.cs_watchdogs);
     }
     if (t->watchdog) Inter.Free(t->watchdog, __FILE__, __LINE__);
     // 移除任务列表
@@ -462,6 +545,9 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri)
                                &task->run_stop_link);
             task->isAddRunStandaloneList = 1;
             C_Static.wait_run_standalone_task_count++;
+            // 唤醒线程
+            if (Inter.events->wake)
+                Inter.events->wake(GetSleepThread()->co_id, Inter.events->object);
         }
     } else {
         // 加入休眠列表
@@ -557,6 +643,7 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
         return nullptr;
     }
     task->coroutine     = coroutine;
+    task->isRuning      = 1;   // 设置运行标志
     coroutine->idx_task = task;
     coroutine->_run_task_cnt++;
     return task;
@@ -574,33 +661,12 @@ static void CheckWatchdog(void)
         return;
     C_Static.check_watchdog_time = Inter.GetMillisecond() + 10;   // 每 10ms 检查一次
     CO_TCB *t                    = C_Static.idx_watchdog;
-    if (t->watchdog && t->watchdog->expiration_time < Inter.GetMillisecond()) {
+    if (t && t->watchdog && t->watchdog->expiration_time < Inter.GetMillisecond()) {
         // 看门狗超时
         // ERROR_WATCHDOG_TIMEOUT(t);
         C_Static.check_watchdog_time = 0;
     }
     return;
-}
-
-/**
- * @brief    获取可能休眠的线程
- * @return   * CO_Thread*   
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2024-07-04
- */
-static CO_Thread *GetSleepThread(void)
-{
-    if (Inter.thread_count == 1)
-        return C_Static.coroutines[0];
-    int idx = rand() % Inter.thread_count;
-    for (size_t i = 0; i < Inter.thread_count; i++) {
-        if (C_Static.coroutines[idx]->isSleep) {
-            C_Static.coroutines[idx]->isSleep = 0;
-            break;
-        }
-        idx = (idx + 1) % Inter.thread_count;
-    }
-    return C_Static.coroutines[idx];
 }
 
 static void __task(CO_TCB *n)
@@ -666,11 +732,10 @@ static void _Task(CO_Thread *coroutine)
     uint32_t sleep_ms          = UINT32_MAX;
     coroutine->task_start_time = Inter.GetMillisecond();
     // 获取下一个任务
-    CO_EnterCriticalSection();
     CheckWatchdog();
+    CO_EnterCriticalSection();
     sleep_ms = GetSleepTask(coroutine, coroutine->task_start_time);
     n        = GetNextTask(coroutine);
-    if (n) n->isRuning = 1;   // 设置运行标志
     CO_LeaveCriticalSection();
     if (n == nullptr) {
         // 运行空闲任务
@@ -887,11 +952,7 @@ static Coroutine_TaskId AddTask(CO_Thread *    coroutine,
     CO_EnterCriticalSection();
     CM_NodeLink_Insert(&C_Static.task_list, CM_NodeLink_End(C_Static.task_list), &n->task_list_link);
     AddTaskList(n, n->priority);
-    uint16_t co_id = coroutine ? coroutine->co_id : GetSleepThread()->co_id;
     CO_LeaveCriticalSection();
-    // 唤醒
-    if (Inter.events->wake != nullptr)
-        Inter.events->wake(co_id, Inter.events->object);
     return n;
 }
 
@@ -1033,25 +1094,27 @@ static Coroutine_Mailbox CreateMailbox(const char *name, uint32_t msg_max_size)
     memcpy(mb->name, name, s);
     mb->name[s] = '\0';
     // 加入邮箱列表
-    CO_EnterCriticalSection();
+    CO_ENTER(&C_Static.cs_mailboxes);
     CM_NodeLink_Insert(&C_Static.mailboxes, CM_NodeLink_End(C_Static.mailboxes), &mb->link);
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_mailboxes);
     return mb;
 }
 
 static void DeleteMailbox(Coroutine_Mailbox mb)
 {
     if (mb == nullptr) return;
-    CO_EnterCriticalSection();
     // 删除所有信息
+    CO_ENTER(&mb->cs);
     while (!CM_NodeLink_IsEmpty(mb->mails)) {
         Coroutine_MailData *md = CM_Field_ToType(Coroutine_MailData, link, CM_NodeLink_First(mb->mails));
         CM_NodeLink_Remove(&mb->mails, &md->link);
         DeleteMessage(md);
     }
+    CO_LEAVE(&mb->cs);
     // 移除邮箱列表
+    CO_ENTER(&C_Static.cs_mailboxes);
     CM_NodeLink_Remove(&C_Static.mailboxes, &mb->link);
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_mailboxes);
     Inter.Free(mb, __FILE__, __LINE__);
     return;
 }
@@ -1064,7 +1127,7 @@ static bool SendMail(Coroutine_Mailbox mb,
 {
     if (mb == nullptr)
         return false;
-    CO_EnterCriticalSection();
+    CO_ENTER(&mb->cs);
     mb->mail_count++;
     if (mb->size < size + sizeof(Coroutine_MailData)) {
         // 检查邮箱，是否有过期邮件
@@ -1087,34 +1150,35 @@ static bool SendMail(Coroutine_Mailbox mb,
                 break;
         }
         if (mb->size < size) {
-            CO_LeaveCriticalSection();
+            CO_LEAVE(&mb->cs);
             return false;
         }
     }
     Coroutine_MailData *dat = MakeMessage(id, data, size, timeout);
     if (dat == nullptr) {
-        CO_LeaveCriticalSection();
+        CO_LEAVE(&mb->cs);
         return false;
     }
     mb->size -= size;
-    uint16_t co_id = 0;
     // 检查等待列表
     if (!CM_NodeLink_IsEmpty(mb->waits)) {
         CM_NodeLink_t *p = CM_NodeLink_First(mb->waits);
         while (true) {
             MailWaitNode *n = CM_Field_ToType(MailWaitNode, link, p);
             if (n->id_mask & id) {
+                // 溢出等待列表
+                CM_NodeLink_Remove(&mb->waits, &n->link);
+                mb->wait_count--;
+                // 设置返回数据
                 n->data = dat;
                 // 开始执行
+                CO_EnterCriticalSection();
                 CO_TCB *task     = (CO_TCB *)n->task;
                 task->execv_time = 0;
                 task->isWaitMail = 0;
-                mb->wait_count--;
                 AddTaskList(task, task->priority);
-                dat   = nullptr;
-                co_id = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
-                // 溢出等待列表
-                CM_NodeLink_Remove(&mb->waits, &n->link);
+                CO_LeaveCriticalSection();
+                dat = nullptr;
                 break;
             }
             p = p->next;
@@ -1123,15 +1187,12 @@ static bool SendMail(Coroutine_Mailbox mb,
         }
     }
     if (dat == nullptr) {
-        CO_LeaveCriticalSection();
-        // 唤醒
-        if (Inter.events->wake != nullptr)
-            Inter.events->wake(co_id, Inter.events->object);
+        CO_LEAVE(&mb->cs);
         return true;
     }
     // 加入消息列表
     CM_NodeLink_Insert(&mb->mails, CM_NodeLink_End(mb->mails), &dat->link);
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&mb->cs);
     return true;
 }
 
@@ -1187,38 +1248,43 @@ static Coroutine_MailResult ReceiveMail(Coroutine_Mailbox mb,
     MailWaitNode  tmp;
     MailWaitNode *n = &tmp;
     CM_ZERO(n);
-    CO_EnterCriticalSection();
+    CO_ENTER(&mb->cs);
     Coroutine_MailData *dat = GetMail(mb, eventId_Mask);
     if (dat)
         goto END;
     // 加入等待列表
-    task->isWaitMail = 1;   // 设置等待标志
-    n->id_mask       = eventId_Mask;
-    n->task          = task;
-    n->data          = nullptr;
-    n->mailbox       = mb;
+    n->id_mask = eventId_Mask;
+    n->task    = task;
+    n->data    = nullptr;
+    n->mailbox = mb;
     CM_NodeLink_Insert(&mb->waits, CM_NodeLink_End(mb->waits), &n->link);
     mb->wait_count++;
+    CO_EnterCriticalSection();
+    // 设置等待标志
+    task->isWaitMail = 1;
     // 设置超时
     CO_SET_TASK_TIME(task, timeout);
     CO_LeaveCriticalSection();
+    CO_LEAVE(&mb->cs);
     // 等待消息
     _Yield();
     // 取出消息
-    CO_EnterCriticalSection();
+    CO_ENTER(&mb->cs);
     if (n->data) {
         dat     = n->data;
         n->data = nullptr;
         mb->size += dat->size;
         mb->mail_count--;
     }
-    CM_NodeLink_Remove(&mb->waits, &n->link);
+    CO_EnterCriticalSection();
     if (task->isWaitMail) {
         task->isWaitMail = 0;   // 清除等待标志
+        CM_NodeLink_Remove(&mb->waits, &n->link);
         mb->wait_count--;
     }
-END:
     CO_LeaveCriticalSection();
+END:
+    CO_LEAVE(&mb->cs);
     if (dat) {
         ret.data = dat->data;
         ret.size = dat->size;
@@ -1440,7 +1506,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     int sn = 0;
-    CO_EnterCriticalSection();
+    CO_ENTER(&C_Static.cs_semaphores);
     CM_NodeLink_Foreach_Positive(CO_Semaphore, link, C_Static.semaphores, s)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
@@ -1449,7 +1515,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", s->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_semaphores);
     // ----------------------------- 邮箱 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
@@ -1458,7 +1524,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
-    CO_EnterCriticalSection();
+    CO_ENTER(&C_Static.cs_mailboxes);
     CM_NodeLink_Foreach_Positive(CO_Mailbox, link, C_Static.mailboxes, mb)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
@@ -1468,7 +1534,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_mailboxes);
     // ----------------------------- 互斥 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
@@ -1481,7 +1547,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     idx += co_snprintf(buf + idx, max_size - idx, "MaxWaitTime");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
-    CO_EnterCriticalSection();
+    CO_ENTER(&C_Static.cs_mailboxes);
     CM_NodeLink_Foreach_Positive(CO_Mutex, link, C_Static.mutexes, m)
     {
         idx += co_snprintf(buf + idx, max_size - idx, "%5d ", ++sn);
@@ -1492,7 +1558,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%u ", m->max_wait_time);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_mailboxes);
     return idx;
 }
 
@@ -1528,11 +1594,11 @@ static Coroutine_Semaphore CreateSemaphore(const char *name, uint32_t init_val)
     memcpy(sem->name, name, s);
     sem->name[s] = '\0';
     // 加入信号列表
-    CO_EnterCriticalSection();
+    CO_ENTER(&C_Static.cs_semaphores);
     CM_NodeLink_Insert(&C_Static.semaphores,
                        CM_NodeLink_End(C_Static.semaphores),
                        &sem->link);
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_semaphores);
     return sem;
 }
 
@@ -1548,12 +1614,14 @@ static void DeleteSemaphore(Coroutine_Semaphore _sem)
     CO_Semaphore *sem = (CO_Semaphore *)_sem;
     if (sem == nullptr)
         return;
+    CO_ENTER(&sem->cs);
     if (!CM_NodeLink_IsEmpty(sem->list))
         ERROR_SEM_DELETE(sem);
-    CO_EnterCriticalSection();
+    CO_LEAVE(&sem->cs);
+    CO_ENTER(&C_Static.cs_semaphores);
     // 移出列表
     CM_NodeLink_Remove(&C_Static.semaphores, &sem->link);
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_semaphores);
     Inter.Free(sem, __FILE__, __LINE__);
     return;
 }
@@ -1570,7 +1638,7 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
     CO_Semaphore *sem = (CO_Semaphore *)_sem;
     if (sem == nullptr || val == 0)
         return;
-    CO_EnterCriticalSection();
+    CO_ENTER(&sem->cs);
     sem->value += val;
     while (!CM_NodeLink_IsEmpty(sem->list)) {
         SemaphoreNode *n = CM_Field_ToType(SemaphoreNode, link, CM_NodeLink_First(sem->list));
@@ -1580,23 +1648,17 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
         n->isOk = true;
         // 移除等待列表
         CM_NodeLink_Remove(&sem->list, &n->link);
-        // 开始执行
+        sem->wait_count--;
+        // 加入运行列表
+        CO_EnterCriticalSection();
         CO_TCB *task = (CO_TCB *)n->task;
         // 清除等待标志
         task->isWaitSem  = 0;
         task->execv_time = 0;
-        sem->wait_count--;
-        // 独立栈从正在休眠的线程中唤醒
-        uint16_t co_id = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
-        // 加入运行列表
         AddTaskList(task, task->priority);
         CO_LeaveCriticalSection();
-        // 唤醒
-        if (Inter.events->wake != nullptr)
-            Inter.events->wake(co_id, Inter.events->object);
-        CO_EnterCriticalSection();
     }
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&sem->cs);
     return;
 }
 
@@ -1630,9 +1692,9 @@ static bool WaitSemaphore(Coroutine_Semaphore _sem, uint32_t val, uint32_t timeo
         else
             tv = timeout - tv;
         // 检查信号值，没有就加入等待列表
-        CO_EnterCriticalSection();
         SemaphoreNode *n = &tmp;
         CM_ZERO(n);
+        CO_ENTER(&sem->cs);
         if (sem->value >= val) {
             sem->value -= val;
             isOk = true;
@@ -1643,30 +1705,35 @@ static bool WaitSemaphore(Coroutine_Semaphore _sem, uint32_t val, uint32_t timeo
             n->semaphore = sem;
             // 加入等待列表
             CM_NodeLink_Insert(&sem->list, CM_NodeLink_End(sem->list), &n->link);
-            // 设置等待标志
-            task->isWaitSem = true;
             // 计数
             sem->wait_count++;
+            CO_EnterCriticalSection();
+            // 设置等待标志
+            task->isWaitSem = true;
             // 设置超时
             CO_SET_TASK_TIME(task, tv);
+            CO_LeaveCriticalSection();
         }
-        CO_LeaveCriticalSection();
+        CO_LEAVE(&sem->cs);
         if (isOk) {
             // 已经获取到信号，直接返回
             return true;
         }
         // 等待
         _Yield();
-        // 移除等待列表
-        CO_EnterCriticalSection();
+        CO_ENTER(&sem->cs);
         if (n->isOk)
             isOk = true;
-        CM_NodeLink_Remove(&sem->list, &n->link);
+        CO_EnterCriticalSection();
         if (task->isWaitSem) {
             task->isWaitSem = false;
+            // 移除等待列表
+            CM_NodeLink_Remove(&sem->list, &n->link);
+            // 设置计数器
             sem->wait_count--;
         }
         CO_LeaveCriticalSection();
+        CO_LEAVE(&sem->cs);
     } while (!isOk && Inter.GetMillisecond() - now < timeout);
     return isOk;
 }
@@ -1687,9 +1754,9 @@ static Coroutine_Mutex CreateMutex(const char *name)
     memcpy(mutex->name, name, s);
     mutex->name[s] = '\0';
     // 加入列表
-    CO_EnterCriticalSection();
+    CO_ENTER(&C_Static.cs_mutexes);
     CM_NodeLink_Insert(&C_Static.mutexes, CM_NodeLink_End(C_Static.mutexes), &mutex->link);
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_mutexes);
     return mutex;
 }
 
@@ -1697,12 +1764,14 @@ static void DeleteMutex(Coroutine_Mutex mutex)
 {
     if (mutex == nullptr)
         return;
+    CO_ENTER(&mutex->cs);
     if (!CM_NodeLink_IsEmpty(mutex->list))
         ERROR_MUTEX_DELETE(mutex);
+    CO_LEAVE(&mutex->cs);
     // 移除列表
-    CO_EnterCriticalSection();
+    CO_ENTER(&C_Static.cs_mutexes);
     CM_NodeLink_Remove(&C_Static.mutexes, &mutex->link);
-    CO_LeaveCriticalSection();
+    CO_LEAVE(&C_Static.cs_mutexes);
     Inter.Free(mutex, __FILE__, __LINE__);
     return;
 }
@@ -1725,7 +1794,7 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
             tv = 0;
         else
             tv = timeout - tv;
-        CO_EnterCriticalSection();
+        CO_ENTER(&mutex->cs);
         MutexWaitNode *wait_mutex = &wait;
         if (mutex->owner == task) {
             // 已经锁定
@@ -1738,6 +1807,7 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
             wait_mutex->mutex = mutex;
             isOk              = true;
         } else {
+            CO_EnterCriticalSection();
             CO_TCB *owner = mutex->owner;
             if (owner->priority > task->priority) {
                 // 优先级提升
@@ -1746,28 +1816,34 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
                 else
                     owner->priority = task->priority;
             }
+            CO_LeaveCriticalSection();
             // 等待锁
             CM_NodeLink_Insert(&mutex->list, CM_NodeLink_End(mutex->list), &wait_mutex->link);
             wait_mutex->mutex = mutex;
             wait_mutex->time  = now;
-            task->isWaitMutex = true;
             mutex->wait_count++;
+            CO_EnterCriticalSection();
+            // 设置等待标志
+            task->isWaitMutex = true;
             // 设置超时
             CO_SET_TASK_TIME(task, tv);
+            CO_LeaveCriticalSection();
         }
-        CO_LeaveCriticalSection();
+        CO_LEAVE(&mutex->cs);
         if (isOk) return true;   // 获取锁成功
         // 等待
         _Yield();
+        CO_ENTER(&mutex->cs);
         // 移除等待列表
-        CO_EnterCriticalSection();
         CM_NodeLink_Remove(&mutex->list, &wait_mutex->link);
+        CO_EnterCriticalSection();
         if (task->isWaitMutex) {
             mutex->wait_count--;
             task->isWaitMutex = false;
         }
-        isOk = mutex->owner == task;
         CO_LeaveCriticalSection();
+        isOk = mutex->owner == task;
+        CO_LEAVE(&mutex->cs);
     } while (!isOk && (Inter.GetMillisecond() - now) < timeout);
     return isOk;
 }
@@ -1777,10 +1853,8 @@ static void UnlockMutex(Coroutine_Mutex mutex)
     CO_Thread *c = GetCurrentThread(-1);
     if (mutex == nullptr || c == nullptr || c->idx_task == nullptr)
         return;
-    CO_TCB * task   = c->idx_task;
-    bool     isWait = false;
-    uint16_t co_id  = 0;
-    CO_EnterCriticalSection();
+    CO_TCB *task = c->idx_task;
+    CO_ENTER(&mutex->cs);
     if (mutex->owner == task) {
         // 解锁
         mutex->value--;
@@ -1793,6 +1867,8 @@ static void UnlockMutex(Coroutine_Mutex mutex)
             if (!CM_NodeLink_IsEmpty(mutex->list)) {
                 MutexWaitNode *n = CM_Field_ToType(MutexWaitNode, link, CM_NodeLink_First(mutex->list));
                 task             = n->task;
+                // 移除等待列表
+                CM_NodeLink_Remove(&mutex->list, &n->link);
                 // 计数等待时间
                 uint64_t tv  = n->time;
                 uint64_t now = Inter.GetMillisecond();
@@ -1800,30 +1876,25 @@ static void UnlockMutex(Coroutine_Mutex mutex)
                     tv = 0;
                 else
                     tv = now - tv;
-                // 清除等待标志
-                task->execv_time  = 0;
-                task->isWaitMutex = false;
                 // 设置拥有者
                 mutex->owner = task;
                 mutex->value = 1;
                 mutex->wait_count--;
+                CO_EnterCriticalSection();
+                // 清除等待标志
+                task->execv_time  = 0;
+                task->isWaitMutex = false;
                 // 加入等待列表
                 AddTaskList(task, task->priority);
-                // 移除等待列表
-                CM_NodeLink_Remove(&mutex->list, &n->link);
+                CO_LeaveCriticalSection();
                 // 获取最大等待时间
                 if (mutex->max_wait_time < tv)
                     mutex->max_wait_time = tv;
-                isWait = true;
-                co_id  = task->coroutine ? task->coroutine->co_id : GetSleepThread()->co_id;
             }
         }
     } else
         ERROR_MUTEX_RELIEVE(task, mutex);   // 解锁异常
-    CO_LeaveCriticalSection();
-    // 唤醒
-    if (isWait && Inter.events->wake != nullptr)
-        Inter.events->wake(co_id, Inter.events->object);
+    CO_LEAVE(&mutex->cs);
     return;
 }
 #endif
@@ -1981,7 +2052,6 @@ static void *ASyncGetResultAndDelete(Coroutine_ASync async_ptr)
         return nullptr;   // 还没执行完
     void *ret = p->ret;
     Coroutine.DeleteSemaphore(p->sem);
-    printf("free sem = %p\n", p->sem);
     Inter.Free(p, __FILE__, __LINE__);
     return ret;
 }
@@ -2003,32 +2073,33 @@ static void FeedDog(uint32_t time)
         if (task->watchdog == nullptr) ERROR_MEMORY_ALLOC(__FILE__, __LINE__, sizeof(WatchdogNode));
         CM_ZERO(task->watchdog);
     }
-    CO_EnterCriticalSection();
     // 从已有的列表中删除
+    CO_ENTER(&C_Static.cs_watchdogs);
     CM_RBTree_Remove(&C_Static.watchdogs, &task->watchdog->link);
-    if (C_Static.idx_watchdog == task)
-    {
-        if (!CM_RBTree_IsEmpty(&C_Static.watchdogs))
-        {
-            WatchdogNode* n = CM_Field_ToType(WatchdogNode, link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
+    if (C_Static.idx_watchdog == task) {
+        if (!CM_RBTree_IsEmpty(&C_Static.watchdogs)) {
+            WatchdogNode *n       = CM_Field_ToType(WatchdogNode, link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
             C_Static.idx_watchdog = n == nullptr ? nullptr : n->task;
-        }
-        else
+        } else
             C_Static.idx_watchdog = nullptr;
     }
+    CO_LEAVE(&C_Static.cs_watchdogs);
+    CO_EnterCriticalSection();
     // 设置超时时间
     if (time == 0)
         task->watchdog->expiration_time = 0;
     else
         task->watchdog->expiration_time = GetMillisecond() + time;
+    CO_LeaveCriticalSection();
     if (task->watchdog->expiration_time) {
         // 添加到新的列表
+        CO_ENTER(&C_Static.cs_watchdogs);
         CM_RBTree_Insert(&C_Static.watchdogs, &task->watchdog->link);
         if (C_Static.idx_watchdog == nullptr ||
             task->watchdog->expiration_time < C_Static.idx_watchdog->watchdog->expiration_time)
             C_Static.idx_watchdog = task;
+        CO_LEAVE(&C_Static.cs_watchdogs);
     }
-    CO_LeaveCriticalSection();
     return;
 }
 #endif
@@ -2063,14 +2134,16 @@ static void DeleteChannel(Coroutine_Channel ch)
 {
     if (ch == nullptr)
         return;
-    CO_EnterCriticalSection();
     // 清除缓存
+    CO_ENTER(&ch->cs);
     while (!CM_NodeLink_IsEmpty(ch->caches)) {
         ChannelDataNode *dat = CM_Field_ToType(ChannelDataNode, link, CM_NodeLink_First(ch->caches));
         CM_NodeLink_Remove(&ch->caches, &dat->link);
         Inter.Free(dat, __FILE__, __LINE__);
     }
+    CO_LEAVE(&ch->cs);
     // 移除列表
+    CO_EnterCriticalSection();
     CM_NodeLink_Remove(&C_Static.channels, &ch->link);
     CO_LeaveCriticalSection();
     // 释放内存
@@ -2097,18 +2170,21 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
             tv = 0;
         else
             tv = timeout - tv;
-        CO_EnterCriticalSection();
+        CO_ENTER(&ch->cs);
         if (!CM_NodeLink_IsEmpty(ch->waits)) {
             // 唤醒等待任务
-            ChannelWaitNode *n     = CM_Field_ToType(ChannelWaitNode, link, CM_NodeLink_First(ch->waits));
+            ChannelWaitNode *n = CM_Field_ToType(ChannelWaitNode, link, CM_NodeLink_First(ch->waits));
+            // 移除等待列表
+            CM_NodeLink_Remove(&ch->waits, &n->link);
+            // 清除标志
+            CO_EnterCriticalSection();
             n->task->execv_time    = 0;
             n->task->isWaitChannel = 0;
             n->data                = data;
             n->isOk                = true;
-            // 移除等待列表
-            CM_NodeLink_Remove(&ch->waits, &n->link);
             // 加入运行列表
             AddTaskList(n->task, n->task->priority);
+            CO_LeaveCriticalSection();
             // 发送完成
             isOk = true;
         } else if (ch->size > 0) {
@@ -2128,21 +2204,26 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
             n->task = task;
             n->data = data;
             CM_NodeLink_Insert(&ch->senders, CM_NodeLink_End(ch->senders), &n->link);
+            CO_EnterCriticalSection();
+            // 设置等待标志
             task->isWaitChannel = 1;
             // 设置任务超时
             CO_SET_TASK_TIME(task, tv);
+            CO_LeaveCriticalSection();
         }
-        CO_LeaveCriticalSection();
+        CO_LEAVE(&ch->cs);
         if (isOk) break;
         // 等待
         _Yield();
+        CO_ENTER(&ch->cs);
         CO_EnterCriticalSection();
         if (task->isWaitChannel) {
             CM_NodeLink_Remove(&ch->senders, &tmp.link);
             task->isWaitChannel = 0;
         }
-        isOk = tmp.isOk;
         CO_LeaveCriticalSection();
+        isOk = tmp.isOk;
+        CO_LEAVE(&ch->cs);
     } while (!isOk && (Inter.GetMillisecond() - now) < timeout);
     return isOk;
 }
@@ -2166,7 +2247,7 @@ static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
             tv = 0;
         else
             tv = timeout - tv;
-        CO_EnterCriticalSection();
+        CO_ENTER(&ch->cs);
         if (!CM_NodeLink_IsEmpty(ch->caches)) {
             // 检查缓存
             ChannelDataNode *dat = CM_Field_ToType(ChannelDataNode, link, CM_NodeLink_First(ch->caches));
@@ -2180,42 +2261,50 @@ static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
             ch->size++;
         } else if (!CM_NodeLink_IsEmpty(ch->senders)) {
             // 获取数据
-            ChannelWaitNode *n     = CM_Field_ToType(ChannelWaitNode, link, CM_NodeLink_First(ch->senders));
+            ChannelWaitNode *n = CM_Field_ToType(ChannelWaitNode, link, CM_NodeLink_First(ch->senders));
+            // 移除发送列表
+            CM_NodeLink_Remove(&ch->senders, &n->link);
+            CO_EnterCriticalSection();
+            // 清除标志
             n->task->execv_time    = 0;
             n->task->isWaitChannel = 0;
             *data                  = n->data;
             n->isOk                = true;
-            // 移除发送列表
-            CM_NodeLink_Remove(&ch->senders, &n->link);
             // 加入运行列表
             AddTaskList(n->task, n->task->priority);
+            CO_LeaveCriticalSection();
             // 发送完成
             isOk = true;
         } else {
             // 加入等待列表
             ChannelWaitNode *n = &tmp;
             CM_ZERO(n);
-            n->task             = task;
-            task->isWaitChannel = 1;
+            n->task = task;
             CM_NodeLink_Insert(&ch->waits, CM_NodeLink_End(ch->waits), &n->link);
+            CO_EnterCriticalSection();
+            // 设置等待标志
+            task->isWaitChannel = 1;
             // 设置任务超时
             CO_SET_TASK_TIME(task, tv);
+            CO_LeaveCriticalSection();
         }
-        CO_LeaveCriticalSection();
+        CO_LEAVE(&ch->cs);
         if (isOk) break;
         // 等待
         _Yield();
+        CO_ENTER(&ch->cs);
         CO_EnterCriticalSection();
         if (task->isWaitChannel) {
             // 移除等待列表
             CM_NodeLink_Remove(&ch->waits, &tmp.link);
             task->isWaitChannel = 0;
         }
+        CO_LeaveCriticalSection();
         if (tmp.isOk) {
             *data = tmp.data;
             isOk  = true;
         }
-        CO_LeaveCriticalSection();
+        CO_LEAVE(&ch->cs);
     } while (!isOk && (Inter.GetMillisecond() - now) < timeout);
     return isOk;
 }
