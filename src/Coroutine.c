@@ -1981,7 +1981,6 @@ static void *ASyncGetResultAndDelete(Coroutine_ASync async_ptr)
         return nullptr;   // 还没执行完
     void *ret = p->ret;
     Coroutine.DeleteSemaphore(p->sem);
-    printf("free sem = %p\n", p->sem);
     Inter.Free(p, __FILE__, __LINE__);
     return ret;
 }
@@ -2006,14 +2005,11 @@ static void FeedDog(uint32_t time)
     CO_EnterCriticalSection();
     // 从已有的列表中删除
     CM_RBTree_Remove(&C_Static.watchdogs, &task->watchdog->link);
-    if (C_Static.idx_watchdog == task)
-    {
-        if (!CM_RBTree_IsEmpty(&C_Static.watchdogs))
-        {
-            WatchdogNode* n = CM_Field_ToType(WatchdogNode, link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
+    if (C_Static.idx_watchdog == task) {
+        if (!CM_RBTree_IsEmpty(&C_Static.watchdogs)) {
+            WatchdogNode *n       = CM_Field_ToType(WatchdogNode, link, CM_RBTree_LeftEnd(&C_Static.watchdogs));
             C_Static.idx_watchdog = n == nullptr ? nullptr : n->task;
-        }
-        else
+        } else
             C_Static.idx_watchdog = nullptr;
     }
     // 设置超时时间
