@@ -233,7 +233,7 @@ int main()
     sem1    = Coroutine.CreateSemaphore("sem1", 0);
     mail1   = Coroutine.CreateMailbox("mail1", 1024);
     lock    = Coroutine.CreateMutex("lock");
-    ch1     = Coroutine.CreateChannel("ch1", 1);
+    ch1     = Coroutine.CreateChannel("ch1", 0);
     int num = 0;
 
     Coroutine_TaskAttribute atr;

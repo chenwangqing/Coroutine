@@ -203,9 +203,10 @@ static Coroutine_Events events = {
        int                        line,
        Coroutine_ErrEvent_t       event,
        const Coroutine_ErrPars_t *pars) -> void {
-        printf("Coroutine Error: %d\n", event);
+        printf("[%llu]Coroutine Error: %d\n", GetMillisecond(), event);
         switch (event) {
             case CO_ERR_WATCHDOG_TIMEOUT:
+                printf("task %p watchdog timeout\n", pars->watchdog_timeout.taskId);
                 break;
             default:
                 break;
