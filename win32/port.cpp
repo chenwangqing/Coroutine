@@ -18,7 +18,6 @@
 
 #define EN_ATOMIC 0
 
-static CRITICAL_SECTION critical_section;
 static CRITICAL_SECTION memory_critical_section;
 static LONG volatile lock_critical_section = 0;
 struct
@@ -27,24 +26,31 @@ struct
     int64_t max_used;
 } memory;
 
-static void _Lock(const char *file, int line)
+static  void *_CreateLock(void)
 {
-#if EN_ATOMIC
-    while (InterlockedIncrement(&lock_critical_section) != 1)
-        InterlockedDecrement(&lock_critical_section);
-#else
-    EnterCriticalSection(&critical_section);
-#endif
+    CRITICAL_SECTION *cs = new CRITICAL_SECTION();
+    InitializeCriticalSection(cs);
+    return cs;
+}
+
+static void _DestroyLock(void *cs)
+{
+    if(cs == nullptr)
+        return;
+    DeleteCriticalSection((CRITICAL_SECTION*)cs);
+    delete (CRITICAL_SECTION*)cs;
     return;
 }
 
-static void _Unlock(const char *file, int line)
+static void _Lock(void *cs,const char *file, int line)
 {
-#if EN_ATOMIC
-    InterlockedDecrement(&lock_critical_section);
-#else
-    LeaveCriticalSection(&critical_section);
-#endif
+    EnterCriticalSection((CRITICAL_SECTION*)cs);
+    return;
+}
+
+static void _Unlock(void *cs,const char *file, int line)
+{
+    LeaveCriticalSection((CRITICAL_SECTION*)cs);
     return;
 }
 
@@ -145,6 +151,10 @@ static Coroutine_Events events = {
 
 static const Coroutine_Inter Inter = {
     MAX_THREADS,
+#if COROUTINE_BLOCK_CRITICAL_SECTION
+    _CreateLock,
+    _DestroyLock,
+#endif
     _Lock,
     _Unlock,
     _Malloc,

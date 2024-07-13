@@ -225,19 +225,35 @@ typedef struct
 {
     size_t thread_count;   // 线程数量
 
+#if COROUTINE_BLOCK_CRITICAL_SECTION
+    /**
+     * @brief    创建临界
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-13
+     */
+    void *(CreateCriticalSection)(void);
+
+    /**
+     * @brief    删除临界
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-13
+     */
+    void (*DeleteCriticalSection)(void*cs);
+    #endif
+
     /**
      * @brief    进入临界保护
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-26
      */
-    void (*EnterCriticalSection)(const char *file, int line);
+    void (*EnterCriticalSection)(void *cs,const char *file, int line);
 
     /**
      * @brief    推出临界保护
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-26
      */
-    void (*LeaveCriticalSection)(const char *file, int line);
+    void (*LeaveCriticalSection)(void *cs,const char *file, int line);
 
     /**
      * @brief    内存分配
