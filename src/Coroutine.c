@@ -174,6 +174,7 @@ struct _CO_Thread
 {
     jmp_buf              env;               // 环境
     uint8_t              isRun : 1;         // 运行
+    uint8_t              isIdle : 1;        // 空闲
     uint8_t              _run_task_cnt;     // 运行任务次数
     volatile STACK_TYPE *stack;             // 栈
     CO_TCB *             idx_task;          // 当前任务
@@ -396,14 +397,12 @@ static void CheckStack(volatile CO_TCB *t)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-07-04
  */
-static bool GetIdleThread(CO_TCB *task)
+static void WakeIdleThread(CO_TCB *task)
 {
-    if (task == nullptr)
-        return false;
-    int idx = rand() % Inter.thread_count;
+    int idx = 0;   //rand() % Inter.thread_count;
     for (size_t i = 0; i < Inter.thread_count && C_Static.idle_threads; i++) {
-        if (C_Static.coroutines[idx]->idx_task == nullptr) {
-            C_Static.coroutines[idx]->idx_task = task;
+        if (C_Static.coroutines[idx]->isIdle) {
+            C_Static.coroutines[idx]->isIdle = 0;
             C_Static.idle_threads--;
             if (Inter.events->wake)
                 Inter.events->wake(C_Static.coroutines[idx]->co_id, Inter.events->object);
@@ -481,30 +480,15 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri, CO_Thread *work)
     if (new_pri != task->priority)
         task->priority = new_pri;                   // 更新优先级
     if (task->isDel || now >= task->execv_time) {   // 加入运行列表
-        if (work) {
-            work->idx_task = task;   // 本线程可以继续使用
-            C_Static.idle_threads--;
-        } else if (task->isDynamicThread == 0 ||
-                   Inter.thread_count == 1 ||
-                   !coroutine_is_dynamic_run_thread()) {
-            if (coroutine->idx_task == nullptr) {
-                coroutine->idx_task = task;
-                C_Static.idle_threads--;
-                if (Inter.events->wake)
-                    Inter.events->wake(coroutine->co_id, Inter.events->object);
-            } else {
-                // 共享栈，加入本协程控制器
-                CM_NodeLink_Insert(&coroutine->tasks_run[task->priority],
-                                   CM_NodeLink_End(coroutine->tasks_run[task->priority]),
-                                   &task->run_stop_link);
-                task->isAddRunList = 1;
-                if (!isOldRun) {
-                    // 唤醒线程
-                    if (C_Static.idle_threads && Inter.events->wake)
-                        Inter.events->wake(coroutine->co_id, Inter.events->object);
-                }
-            }
-        } else if (!GetIdleThread(task)) {
+        if (task->isDynamicThread == 0 ||
+            Inter.thread_count == 1 ||
+            !coroutine_is_dynamic_run_thread()) {
+            // 共享栈，加入本协程控制器
+            CM_NodeLink_Insert(&coroutine->tasks_run[task->priority],
+                               CM_NodeLink_End(coroutine->tasks_run[task->priority]),
+                               &task->run_stop_link);
+            task->isAddRunList = 1;
+        } else {
             // 独立栈，加入公共列表
             task->coroutine = nullptr;
             CM_NodeLink_Insert(&C_Static.standalone_tasks_run[task->priority],
@@ -513,6 +497,9 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri, CO_Thread *work)
             task->isAddRunStandaloneList = 1;
             C_Static.wait_run_standalone_task_count++;
         }
+        // 唤醒其他
+        if (!isOldRun && work == nullptr)
+            WakeIdleThread(task);
     } else {
         // 加入休眠列表
         CM_RBTree_Insert(&coroutine->tasks_sleep, &task->sleep_link);
@@ -580,7 +567,7 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
 {
     if (coroutine->isRun == 0)
         return nullptr;
-    CO_TCB *task    = coroutine->idx_task;
+    CO_TCB *task    = nullptr;
     bool    isLocal = coroutine->_run_task_cnt & 0x01;
     for (int i = 0; i < MAX_PRIORITY_NUM && task == nullptr; i++) {
         if (isLocal) {
@@ -595,12 +582,11 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
                 task = GetNextTask_LocalTask(coroutine, i);
         }
     }
-    if (task == nullptr)
+    if (task == nullptr) {
         return nullptr;
+    }
     // 检查任务是否需要删除
     if (task->isDel) {
-        coroutine->idx_task = nullptr;
-        C_Static.idle_threads++;
         DeleteTask(task);
         return nullptr;
     }
@@ -698,6 +684,13 @@ static void _Task(CO_Thread *coroutine)
     CO_EnterCriticalSection();
     sleep_ms = GetSleepTask(coroutine, coroutine->task_start_time);
     n        = GetNextTask(coroutine);
+    if (n == nullptr && coroutine->isIdle == 0) {
+        coroutine->isIdle = 1;
+        C_Static.idle_threads++;
+    } else if (n != nullptr && coroutine->isIdle) {
+        coroutine->isIdle = 0;
+        C_Static.idle_threads--;
+    }
     CO_LeaveCriticalSection();
     if (n == nullptr) {
         // 运行空闲任务
@@ -729,7 +722,6 @@ static void _Task(CO_Thread *coroutine)
     n->isRuning = 0;   // 清除运行标志
     // 线程空闲
     coroutine->idx_task = nullptr;
-    C_Static.idle_threads++;
     // 加入任务列表
     AddTaskList((CO_TCB *)n, n->priority, coroutine);
     CO_LeaveCriticalSection();
@@ -2012,8 +2004,6 @@ static void SetInter(const Coroutine_Inter *inter)
     CM_RBTree_Init(&C_Static.watchdogs, __watchdogs_cm_rbtree_callback_compare);
     // 默认堆栈大小
     C_Static.def_stack_size = coroutine_get_stack_default_size();
-    // 设置空闲数量
-    C_Static.idle_threads = inter->thread_count;
     // 初始化完成，启动线程
     for (uint16_t i = 0; i < inter->thread_count; i++)
         C_Static.coroutines[i]->isRun = true;
