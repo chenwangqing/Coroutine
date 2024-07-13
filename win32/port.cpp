@@ -26,7 +26,7 @@ struct
     int64_t max_used;
 } memory;
 
-static  void *_CreateLock(void)
+static void *_CreateLock(void)
 {
     CRITICAL_SECTION *cs = new CRITICAL_SECTION();
     InitializeCriticalSection(cs);
@@ -35,22 +35,25 @@ static  void *_CreateLock(void)
 
 static void _DestroyLock(void *cs)
 {
-    if(cs == nullptr)
+    if (cs == nullptr)
         return;
-    DeleteCriticalSection((CRITICAL_SECTION*)cs);
-    delete (CRITICAL_SECTION*)cs;
+    CRITICAL_SECTION *p = (CRITICAL_SECTION *)cs;
+    DeleteCriticalSection(p);
+    delete p;
     return;
 }
 
-static void _Lock(void *cs,const char *file, int line)
+static void _Lock(void *cs, const char *file, int line)
 {
-    EnterCriticalSection((CRITICAL_SECTION*)cs);
+    CRITICAL_SECTION *p = (CRITICAL_SECTION *)cs;
+    EnterCriticalSection(p);
     return;
 }
 
-static void _Unlock(void *cs,const char *file, int line)
+static void _Unlock(void *cs, const char *file, int line)
 {
-    LeaveCriticalSection((CRITICAL_SECTION*)cs);
+    CRITICAL_SECTION *p = (CRITICAL_SECTION *)cs;
+    LeaveCriticalSection(p);
     return;
 }
 
@@ -60,9 +63,9 @@ static void _Free(void *ptr, const char *file, int line)
         return;
     size_t *p = (size_t *)ptr;
     p--;
-    EnterCriticalSection(&critical_section);
+    EnterCriticalSection(&memory_critical_section);
     memory.used -= (*p) + sizeof(size_t);
-    LeaveCriticalSection(&critical_section);
+    LeaveCriticalSection(&memory_critical_section);
     free(p);
     return;
 }
@@ -71,11 +74,11 @@ static void *_Malloc(size_t size, const char *file, int line)
 {
     size_t *ptr = (size_t *)malloc(size + sizeof(size_t));
     *ptr        = size;
-    EnterCriticalSection(&critical_section);
+    EnterCriticalSection(&memory_critical_section);
     memory.used += size + sizeof(size_t);
     if (memory.used > memory.max_used)
         memory.max_used = memory.used;
-    LeaveCriticalSection(&critical_section);
+    LeaveCriticalSection(&memory_critical_section);
     return ptr + 1;
 }
 
@@ -101,7 +104,7 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
     }
 }
 
-#define MAX_THREADS 4
+#define MAX_THREADS 6
 
 static HANDLE sem_sleep[MAX_THREADS];
 static bool   is_sem_sleep[MAX_THREADS];
@@ -115,19 +118,19 @@ static Coroutine_Events events = {
     [](uint32_t time, void *object) -> void {
         // Sleep(1); 模拟休眠
         int idx = Coroutine.GetCurrentCoroutineIdx();
-        EnterCriticalSection(&critical_section);
+        EnterCriticalSection(&memory_critical_section);
         is_sem_sleep[idx] = 1;
-        LeaveCriticalSection(&critical_section);
+        LeaveCriticalSection(&memory_critical_section);
         WaitForSingleObject(sem_sleep[idx], time);
-        EnterCriticalSection(&critical_section);
+        EnterCriticalSection(&memory_critical_section);
         is_sem_sleep[idx] = 0;
-        LeaveCriticalSection(&critical_section);
+        LeaveCriticalSection(&memory_critical_section);
         return;
     },
     [](uint16_t co_id, void *object) -> void {
-        EnterCriticalSection(&critical_section);
+        EnterCriticalSection(&memory_critical_section);
         bool isWait = is_sem_sleep[co_id];
-        LeaveCriticalSection(&critical_section);
+        LeaveCriticalSection(&memory_critical_section);
         if (isWait)
             ReleaseSemaphore(sem_sleep[co_id], 1, NULL);
         return;
@@ -166,7 +169,6 @@ static const Coroutine_Inter Inter = {
 
 const Coroutine_Inter *GetInter(void)
 {
-    InitializeCriticalSection(&critical_section);
     InitializeCriticalSection(&memory_critical_section);
     for (int i = 0; i < MAX_THREADS; i++) {
         sem_sleep[i] = CreateSemaphore(

@@ -231,29 +231,29 @@ typedef struct
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-07-13
      */
-    void *(CreateCriticalSection)(void);
+    void *(*CreateCriticalSection)(void);
 
     /**
      * @brief    删除临界
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-07-13
      */
-    void (*DeleteCriticalSection)(void*cs);
-    #endif
+    void (*DeleteCriticalSection)(void *cs);
+#endif
 
     /**
      * @brief    进入临界保护
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-26
      */
-    void (*EnterCriticalSection)(void *cs,const char *file, int line);
+    void (*EnterCriticalSection)(void *cs, const char *file, int line);
 
     /**
      * @brief    推出临界保护
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-26
      */
-    void (*LeaveCriticalSection)(void *cs,const char *file, int line);
+    void (*LeaveCriticalSection)(void *cs, const char *file, int line);
 
     /**
      * @brief    内存分配
