@@ -92,7 +92,7 @@ struct _CO_Semaphore
     uint32_t          value;        // 信号值
     uint32_t          wait_count;   // 等待数
     CM_NodeLink_t     link;         // _CO_Semaphore
-    CO_CS cs;   // 临界区
+    CO_CS             cs;           // 临界区
 };
 
 struct _CO_Mutex
@@ -104,7 +104,7 @@ struct _CO_Mutex
     uint32_t          max_wait_time;   // 最大等待时间
     CM_NodeLink_t     link;            // _CO_Mutex
     CO_TCB *          owner;           // 持有者
-    CO_CS cs;   // 临界区
+    CO_CS             cs;              // 临界区
 };
 
 struct _CO_Mutex_Wait_Node
@@ -211,7 +211,7 @@ struct _CO_Mailbox
     CM_NodeLinkList_t mails;        // 邮件列表
     CM_NodeLinkList_t waits;        // 等待列表 MailWaitNode
     CM_NodeLink_t     link;         // _CO_Mailbox
-    CO_CS cs;   // 临界区
+    CO_CS             cs;           // 临界区
 };
 
 struct _CO_ASync
@@ -244,7 +244,7 @@ struct _CO_Channel
     CM_NodeLinkList_t caches;     // 缓存列表 ChannelDataNode
     CM_NodeLinkList_t senders;    // 发送者列表 ChannelWaitNode
     CM_NodeLink_t     link;       // CO_Channel
-    CO_CS cs;   // 临界区
+    CO_CS             cs;         // 临界区
 };
 
 static Coroutine_Inter Inter;   // 外部接口
@@ -265,7 +265,7 @@ static struct
     uint32_t          wait_run_standalone_task_count;           // 等待运行任务数量
     uint32_t          def_stack_size;                           // 默认栈大小
     uint32_t          sleep_thread_count;                       // 休眠线程数量
-    uint16_t              ThreadAllocNum;                          // 线程分配数量
+    uint16_t          ThreadAllocNum;                           // 线程分配数量
 
 #if COROUTINE_BLOCK_CRITICAL_SECTION
     CO_CS cs_semaphores;   // 临界区
@@ -885,38 +885,37 @@ static CO_Thread *GetCurrentThread(int co_idx)
         if (ret->ThreadId == (size_t)-1)
             ret->ThreadId = Inter.GetThreadId();
     } else {
-            if (co_idx < 0) {
-                size_t id  = Inter.GetThreadId();
-            if(C_Static.ThreadAllocNum == Inter.thread_count)
-            {
-                size_t s=0,idx = 0,e=Inter.thread_count-1;
-                while(s<=e)
-                {
-                    idx = (s+e)>>1;
-                    if(C_Static.coroutines[idx]->ThreadId == id)
-                    {
+        if (co_idx < 0) {
+            size_t id = Inter.GetThreadId();
+            if (C_Static.ThreadAllocNum == Inter.thread_count) {
+                size_t s = 0, idx = 0, e = Inter.thread_count - 1;
+                while (s <= e) {
+                    idx = (s + e) >> 1;
+                    if (C_Static.coroutines[idx]->ThreadId == id) {
                         ret = C_Static.coroutines[idx];
                         break;
-                    }
-                    else if(C_Static.coroutines[idx]->ThreadId < id)
-                        s = idx+1;
+                    } else if (C_Static.coroutines[idx]->ThreadId < id)
+                        s = idx + 1;
                     else
-                        e = idx-1;
+                        e = idx - 1;
                 }
-            }else {
+            } else {
                 // 分配线程
                 CO_EnterCriticalSection();
-                C_Static.coroutines[C_Static.ThreadAllocNum++]->ThreadId = id;
-                if(C_Static.ThreadAllocNum == Inter.thread_count)
-                {
+                bool isOk = true;
+                for (int i = 0; i < C_Static.ThreadAllocNum; i++) {
+                    if (C_Static.coroutines[i]->ThreadId == id) {
+                        isOk = false;
+                        break;
+                    }
+                }
+                if (isOk) C_Static.coroutines[C_Static.ThreadAllocNum++]->ThreadId = id;
+                if (C_Static.ThreadAllocNum == Inter.thread_count) {
                     // 排序
-                    for (int i = 0; i < Inter.thread_count;i++)
-                    {
-                        for (int j = i+1; j < Inter.thread_count ; j++)
-                        {
-                            if(C_Static.coroutines[j]->ThreadId < C_Static.coroutines[i]->ThreadId)
-                            {
-                                id = C_Static.coroutines[i]->ThreadId;
+                    for (int i = 0; i < Inter.thread_count; i++) {
+                        for (int j = i + 1; j < Inter.thread_count; j++) {
+                            if (C_Static.coroutines[j]->ThreadId < C_Static.coroutines[i]->ThreadId) {
+                                id                               = C_Static.coroutines[i]->ThreadId;
                                 C_Static.coroutines[i]->ThreadId = C_Static.coroutines[j]->ThreadId;
                                 C_Static.coroutines[j]->ThreadId = id;
                             }
@@ -927,13 +926,8 @@ static CO_Thread *GetCurrentThread(int co_idx)
                 return nullptr;
             }
         } else {
-            CM_NodeLink_Foreach_Positive(CO_Thread, link, C_Static.threads, p)
-            {
-                if (p->co_id == co_idx) {
-                    ret = p;
-                    break;
-                }
-            }
+            if (co_idx < Inter.thread_count)
+                ret = C_Static.coroutines[co_idx];
         }
     }
     return ret;
@@ -2220,14 +2214,14 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
             // 移除等待列表
             CM_NodeLink_Remove(&ch->waits, &n->link);
             // 清除标志
-        CO_APP_EnterCriticalSection();
+            CO_APP_EnterCriticalSection();
             n->task->execv_time    = 0;
             n->task->isWaitChannel = 0;
             n->data                = data;
             n->isOk                = true;
             // 加入运行列表
             AddTaskList(n->task, n->task->priority);
-        CO_APP_LeaveCriticalSection();
+            CO_APP_LeaveCriticalSection();
             // 发送完成
             isOk = true;
         } else if (ch->size > 0) {
@@ -2247,12 +2241,12 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
             n->task = task;
             n->data = data;
             CM_NodeLink_Insert(&ch->senders, CM_NodeLink_End(ch->senders), &n->link);
-        CO_APP_EnterCriticalSection();
+            CO_APP_EnterCriticalSection();
             // 设置等待标志
             task->isWaitChannel = 1;
             // 设置任务超时
             CO_SET_TASK_TIME(task, tv);
-        CO_APP_LeaveCriticalSection();
+            CO_APP_LeaveCriticalSection();
         }
         CO_APP_LEAVE(&ch->cs);
         if (isOk) break;
