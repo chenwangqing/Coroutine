@@ -405,6 +405,7 @@ static CO_Thread *GetSleepThread(void)
     for (size_t i = 0; i < Inter.thread_count && C_Static.sleep_thread_count; i++) {
         if (C_Static.coroutines[idx]->isSleep) {
             C_Static.coroutines[idx]->isSleep = 0;
+            C_Static.sleep_thread_count--;
             break;
         }
         idx = (idx + 1) % Inter.thread_count;
@@ -704,8 +705,10 @@ static void _Task(CO_Thread *coroutine)
             CO_LeaveCriticalSection();
             Inter.events->Idle(sleep_ms - 1, Inter.events->object);
             CO_EnterCriticalSection();
-            coroutine->isSleep = 0;   // 清除休眠状态
-            C_Static.sleep_thread_count--;
+            if (coroutine->isSleep) {
+                coroutine->isSleep = 0;   // 清除休眠状态
+                C_Static.sleep_thread_count--;
+            }
             CO_LeaveCriticalSection();
 #if COROUTINE_ENABLE_PRINT_INFO
             now = Inter.GetMillisecond() - now;
