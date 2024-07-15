@@ -581,11 +581,12 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
 
 static void CheckSuccessorTask(void)
 {
-    if (C_Static.SleepNum == Inter.thread_count - C_Static.RunNum &&   // 所有非休眠的线程都在运行
-        C_Static.wait_run_standalone_task_count) {                     // 后续任务需要唤醒其他线程
-        // 其他任务都休眠了，检查是否有后续任务
-        WakeIdleThread();   // 后续还有任务，唤醒其他线程
-    }
+    // 检查是否有空闲线程
+    if (C_Static.SleepNum < Inter.thread_count - C_Static.RunNum)
+        return;   // 有空闲的线程
+    if (C_Static.wait_run_standalone_task_count == 0)
+        return;         // 没有后续任务
+    WakeIdleThread();   // 后续还有任务，唤醒其他线程
     return;
 }
 
