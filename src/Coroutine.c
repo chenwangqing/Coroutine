@@ -173,7 +173,6 @@ struct _CO_Thread
     jmp_buf              env;               // 环境
     uint8_t              isRun : 1;         // 运行
     uint8_t              isIdle : 1;        // 空闲
-    uint8_t              isSleep : 1;       // 正在休眠
     volatile STACK_TYPE *stack;             // 栈
     CO_TCB *             idx_task;          // 当前任务
     size_t               ThreadId;          // 当前协程的线程id
@@ -644,38 +643,33 @@ static void _enter_into(volatile CO_TCB *n)
  */
 static void _Task(CO_Thread *coroutine)
 {
-    CO_TCB * n                 = nullptr;
-    uint32_t sleep_ms          = UINT32_MAX;
-    coroutine->task_start_time = Inter.GetMillisecond();
+    CO_TCB * n        = nullptr;
+    uint32_t sleep_ms = UINT32_MAX;
+    uint64_t now      = Inter.GetMillisecond();
     // 获取下一个任务
     CheckWatchdog();
     CO_EnterCriticalSection();
-    sleep_ms          = GetSleepTask(coroutine, coroutine->task_start_time);
+    sleep_ms          = GetSleepTask(coroutine, now);
     n                 = GetNextTask(coroutine);
     coroutine->isIdle = n == nullptr;
     if (n) {
         C_Static.RunNum++;
+#if COROUTINE_ENABLE_PRINT_INFO
+        coroutine->sleep_time += now - coroutine->task_start_time;
+        coroutine->task_start_time = now;
+#endif
         CheckSuccessorTask();
     }
     CO_LeaveCriticalSection();
     if (n == nullptr) {
         // 运行空闲任务
         if (sleep_ms > 1 && Inter.events->Idle != nullptr) {
-#if COROUTINE_ENABLE_PRINT_INFO
-            uint64_t now = Inter.GetMillisecond();
-#endif
             CO_EnterCriticalSection();
-            coroutine->isSleep = 1;
             C_Static.SleepNum++;
             CO_LeaveCriticalSection();
             Inter.events->Idle(sleep_ms - 1, Inter.events->object);
-#if COROUTINE_ENABLE_PRINT_INFO
-            now = Inter.GetMillisecond() - now;
-            coroutine->sleep_time += now;
-#endif
             CO_EnterCriticalSection();
             C_Static.SleepNum--;
-            coroutine->isSleep = 0;
             CO_LeaveCriticalSection();
         }
         return;
@@ -698,6 +692,7 @@ static void _Task(CO_Thread *coroutine)
     coroutine->idx_task = nullptr;
     coroutine->isIdle   = 1;
     C_Static.RunNum--;
+    coroutine->task_start_time = Inter.GetMillisecond();
     // 加入任务列表
     AddTaskList((CO_TCB *)n, n->priority, coroutine);
     CO_LeaveCriticalSection();
@@ -1917,7 +1912,7 @@ static Coroutine_Handle Coroutine_Create(size_t id)
     CM_ZERO(c);
     c->isRun = false;
 #if COROUTINE_ENABLE_PRINT_INFO
-    c->start_time = Inter.GetMillisecond();
+    c->task_start_time = c->start_time = Inter.GetMillisecond();
 #endif
     c->ThreadId = id;
     CM_RBTree_Init(&c->tasks_sleep, __tasks_sleep_cm_rbtree_callback_compare);
