@@ -327,16 +327,20 @@ typedef struct
      * @brief    添加协程任务
      * @param    func           执行函数
      * @param    pars           执行参数
+     * @param    pri            任务优先级
+     * @param    stack_size     任务栈大小
      * @param    name           协程名称
-     * @param    attr           任务属性 nullptr:默认属性
+     * @param    taskId         任务id
      * @return   int            协程id NULL：创建失败
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-08-15
      */
-    Coroutine_TaskId (*AddTask)(Coroutine_Task                 func,
-                                void *                         pars,
-                                const char *                   name,
-                                const Coroutine_TaskAttribute *attr);
+    Coroutine_TaskId (*AddTask)(Coroutine_Task    func,
+                                void *            pars,
+                                uint8_t           pri,
+                                uint32_t          stack_size,
+                                const char *      name,
+                                Coroutine_TaskId *taskId);
 
     /**
      * @brief    获取当前任务id

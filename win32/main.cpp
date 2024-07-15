@@ -208,8 +208,8 @@ DWORD WINAPI ThreadProc_test2(LPVOID lpParam)
 
 static void Task_Channel1(void *obj)
 {
-    uint64_t num = 0;
-    uint64_t now = Coroutine.GetMillisecond();
+    uint64_t num   = 0;
+    uint64_t now   = Coroutine.GetMillisecond();
     uint64_t total = 0, count = 0;
     while (true) {
         Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);
@@ -301,35 +301,30 @@ int main()
             NULL);        // 返回线程ID
     }
 
-    sem1    = Coroutine.CreateSemaphore("sem1", 0);
-    mail1   = Coroutine.CreateMailbox("mail1", 1024);
-    lock    = Coroutine.CreateMutex("lock");
-    ch1     = Coroutine.CreateChannel("ch1", 0);
-    int num = 0;
-
-    Coroutine_TaskAttribute atr;
-    memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
-    atr.co_idx     = -1;
-    atr.stack_size = 1024 * 16;
-    atr.pri        = TASK_PRI_NORMAL;
+    sem1           = Coroutine.CreateSemaphore("sem1", 0);
+    mail1          = Coroutine.CreateMailbox("mail1", 1024);
+    lock           = Coroutine.CreateMutex("lock");
+    ch1            = Coroutine.CreateChannel("ch1", 0);
+    int num        = 0;
+    int stack_size = 1024 * 16;
 
     Sleep(rand() % 1000);
-    Coroutine.AddTask(Task1, nullptr, "Task1", &atr);
+    Coroutine.AddTask(Task1, nullptr, TASK_PRI_NORMAL, stack_size, "Task1", nullptr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(Task2, nullptr, "Task2", &atr);
+    Coroutine.AddTask(Task2, nullptr, TASK_PRI_NORMAL, stack_size, "Task2", nullptr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
+    Coroutine.AddTask(Task3, nullptr, TASK_PRI_NORMAL, stack_size, "Task3", nullptr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
+    Coroutine.AddTask(Task4, nullptr, TASK_PRI_NORMAL, stack_size, "Task4", nullptr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(Task5, &num, "Task5-1", &atr);
+    Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-1", nullptr);
     Sleep(rand() % 1000);
-    Coroutine.AddTask(Task6, &num, "Task5-2", &atr);
+    Coroutine.AddTask(Task6, &num, TASK_PRI_NORMAL, stack_size, "Task5-2", nullptr);
 
-    Coroutine.AddTask(Task7, nullptr, "Task7", &atr);
+    Coroutine.AddTask(Task7, nullptr, TASK_PRI_NORMAL, stack_size, "Task7", nullptr);
 
-    Coroutine.AddTask(Task_Channel1, nullptr, "Channel1", &atr);
-    Coroutine.AddTask(Task_Channel2, nullptr, "Channel2", &atr);
+    Coroutine.AddTask(Task_Channel1, nullptr, TASK_PRI_NORMAL, stack_size, "Channel1", nullptr);
+    Coroutine.AddTask(Task_Channel2, nullptr, TASK_PRI_NORMAL, stack_size, "Channel2", nullptr);
 
     CO::Task::SetDefaultTaskStackSize(16 << 10);
     CO::Task::Start("Task10", Task10);

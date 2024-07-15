@@ -83,18 +83,6 @@ static void longjmp(jmp_buf buf, int val)
 // --------------------------------------------------------------------------------------
 
 /**
- * @brief    支持动态分配运行的线程
- * @return   true           可以在多个线程上运行（非同时运行）
- * @return   false          创建任务后就一直在一个线程上运行
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2024-07-04
- */
-static inline bool coroutine_is_dynamic_run_thread(void)
-{
-    return true;
-}
-
-/**
  * @brief    获取默认栈大小
  * @return   uint32_t
  * @author   CXS (chenxiangshu@outlook.com)

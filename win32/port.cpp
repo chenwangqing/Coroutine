@@ -107,7 +107,7 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
 #define MAX_THREADS 6
 
 static HANDLE sem_sleep[MAX_THREADS];
-static bool   is_sem_sleep[MAX_THREADS];
+static int    num_sem_sleep[MAX_THREADS];
 
 static Coroutine_Events events = {
     nullptr,
@@ -116,20 +116,22 @@ static Coroutine_Events events = {
         return;
     },
     [](uint32_t time, void *object) -> void {
-        // Sleep(1); 模拟休眠
         int idx = Coroutine.GetCurrentCoroutineIdx();
         EnterCriticalSection(&memory_critical_section);
-        is_sem_sleep[idx] = 1;
+        bool isOk = num_sem_sleep[idx] > 0;
+        num_sem_sleep[idx]--;
         LeaveCriticalSection(&memory_critical_section);
+        if (isOk) return;
         WaitForSingleObject(sem_sleep[idx], time);
         EnterCriticalSection(&memory_critical_section);
-        is_sem_sleep[idx] = 0;
+        num_sem_sleep[idx] = 0;
         LeaveCriticalSection(&memory_critical_section);
         return;
     },
     [](uint16_t co_id, void *object) -> void {
         EnterCriticalSection(&memory_critical_section);
-        bool isWait = is_sem_sleep[co_id];
+        bool isWait = num_sem_sleep[co_id] < 0;
+        num_sem_sleep[co_id]++;
         LeaveCriticalSection(&memory_critical_section);
         if (isWait)
             ReleaseSemaphore(sem_sleep[co_id], 1, NULL);
@@ -176,7 +178,7 @@ const Coroutine_Inter *GetInter(void)
             0,       // 初始计数
             1024,    // 最大计数
             NULL);   // 未命名信号量
-        is_sem_sleep[i] = false;
+        num_sem_sleep[i] = 0;
     }
     return &Inter;
 }

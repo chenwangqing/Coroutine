@@ -79,16 +79,18 @@ namespace CO {
          * @tparam Fn  void func(xxxx)
          * @tparam Args 形参列表
          * @param    name           任务名称
-         * @param    attr           任务属性
+         * @param    pri            任务优先级
+         * @param    stacks         任务栈大小
          * @param    fn             执行函数
          * @param    args           函数参数
          * @author   CXS (chenxiangshu@outlook.com)
          * @date     2024-07-11
          */
         template<typename Fn, class... Args>
-        static bool Start(const char                    *name,
-                          const Coroutine_TaskAttribute *attr,
-                          Fn                            &fn,
+        static bool Start(const char *name,
+                          uint8_t     pri,
+                          uint32_t    stacks,
+                          Fn         &fn,
                           Args... args)
         {
             if ((void *)fn == nullptr)
@@ -99,7 +101,7 @@ namespace CO {
                 n->Call();
                 delete n;
             };
-            if (Coroutine.AddTask(func, n, name, attr) == nullptr) {
+            if (Coroutine.AddTask(func, n, pri, stacks, name, nullptr) == nullptr) {
                 delete n;
                 return false;
             }
@@ -119,34 +121,7 @@ namespace CO {
         template<typename Fn, class... Args>
         static inline bool Start(uint32_t stacks, Fn &fn, Args... args)
         {
-            Coroutine_TaskAttribute attr;
-            CM_ZERO(&attr);
-            attr.stack_size = stacks;
-            attr.co_idx     = -1;
-            attr.pri        = TASK_PRI_NORMAL;
-            return Start(nullptr, &attr, fn, std::forward<Args>(args)...);
-        }
-
-        /**
-         * @brief    开始协程任务
-         * @tparam Fn  void func(xxxx)
-         * @tparam Args 形参列表
-         * @param    co_idx         指定线程/CPU
-         * @param    stacks         栈大小
-         * @param    fn             执行函数
-         * @param    args           函数参数
-         * @author   CXS (chenxiangshu@outlook.com)
-         * @date     2024-07-11
-         */
-        template<typename Fn, class... Args>
-        static inline bool Start(int co_idx, uint32_t stacks, Fn &fn, Args... args)
-        {
-            Coroutine_TaskAttribute attr;
-            CM_ZERO(&attr);
-            attr.stack_size = stacks;
-            attr.co_idx     = co_idx;
-            attr.pri        = TASK_PRI_NORMAL;
-            return Start(nullptr, &attr, fn, std::forward<Args>(args)...);
+            return Start(nullptr, TASK_PRI_NORMAL, stacks, fn, std::forward<Args>(args)...);
         }
 
         /**
@@ -167,7 +142,7 @@ namespace CO {
                 n->Call();
                 delete n;
             };
-            if (Coroutine.AddTask(func, n, name, nullptr) == nullptr) {
+            if (Coroutine.AddTask(func, n, TASK_PRI_NORMAL, 0, name, nullptr) == nullptr) {
                 delete n;
                 return false;
             }
