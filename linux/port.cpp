@@ -131,7 +131,7 @@ void Sleep(uint32_t time)
     return;
 }
 
-#define MAX_THREADS 4
+#define MAX_THREADS 6
 
 class IdleNode {
 public:
@@ -182,7 +182,7 @@ static IdleNode *idle_node[MAX_THREADS];
 static Coroutine_Events events = {
     nullptr,
     [](void *object) -> void {
-        sched_yield();
+        // sched_yield();
         return;
     },
     [](uint32_t time, void *object) -> void {

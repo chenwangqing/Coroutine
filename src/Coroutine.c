@@ -172,7 +172,6 @@ struct _CO_Thread
 {
     jmp_buf              env;               // 环境
     uint8_t              isRun : 1;         // 运行
-    uint8_t              isIdle : 1;        // 空闲
     volatile STACK_TYPE *stack;             // 栈
     CO_TCB *             idx_task;          // 当前任务
     size_t               ThreadId;          // 当前协程的线程id
@@ -261,6 +260,7 @@ static struct
     uint16_t          ThreadAllocNum;                           // 线程分配数量
     uint16_t          SleepNum;                                 // 休眠数量
     uint16_t          RunNum;                                   // 运行数量(正在运行任务)
+    uint32_t *        idle_mask;                                // 空闲线程掩码
 
 #if COROUTINE_BLOCK_CRITICAL_SECTION
     CO_CS cs_semaphores;   // 临界区
@@ -389,6 +389,23 @@ static void CheckStack(volatile CO_TCB *t)
 #endif
 
 /**
+ * @brief    设置线程的空闲状态
+ * @param    c              
+ * @param    isIdle         
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-15
+ */
+static inline void SetThreadIdle(CO_Thread *c, bool isIdle)
+{
+    int idx = c->co_id;
+    if (isIdle)
+        C_Static.idle_mask[idx >> 5] |= 0x01 << (idx & 0x1F);
+    else
+        C_Static.idle_mask[idx >> 5] &= ~(0x01 << (idx & 0x1F));
+    return;
+}
+
+/**
  * @brief    获取可能休眠的线程
  * @return   * CO_Thread*
  * @author   CXS (chenxiangshu@outlook.com)
@@ -397,11 +414,19 @@ static void CheckStack(volatile CO_TCB *t)
 static void WakeIdleThread()
 {
     int idx = -1;
-    for (size_t i = 0; i < Inter.thread_count; i++) {
-        if (C_Static.coroutines[i]->isIdle) {
-            idx = i;
-            break;
-        }
+    for (size_t i = 0; i < Inter.thread_count; i += 32) {
+        if (C_Static.idle_mask[i >> 5] == 0)
+            continue;
+        register uint32_t index = C_Static.idle_mask[i >> 5];
+        //将第一个为1位的低位都置1，其它位都置0
+        index = (index - 1) & ~index;
+        //得到有多少为1的位
+        index = (index & 0x55555555) + ((index >> 1) & 0x55555555);
+        index = (index & 0x33333333) + ((index >> 2) & 0x33333333);
+        index = (index & 0x0F0F0F0F) + ((index >> 4) & 0x0F0F0F0F);
+        index = (index & 0xFF) + ((index & 0xFF00) >> 8) + ((index & 0xFF0000) >> 16) + ((index & 0xFF000000) >> 24);
+        //得到位数,如果为32则表示全0
+        idx = (int)(index);
     }
     if (idx < 0)
         return;
@@ -556,8 +581,8 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
 
 static void CheckSuccessorTask(void)
 {
-    if (C_Static.RunNum <= C_Static.wait_run_standalone_task_count &&
-        C_Static.SleepNum == Inter.thread_count - C_Static.RunNum) {
+    if (C_Static.SleepNum == Inter.thread_count - C_Static.RunNum &&   // 所有非休眠的线程都在运行
+        C_Static.wait_run_standalone_task_count) {                     // 后续任务需要唤醒其他线程
         // 其他任务都休眠了，检查是否有后续任务
         WakeIdleThread();   // 后续还有任务，唤醒其他线程
     }
@@ -649,9 +674,10 @@ static void _Task(CO_Thread *coroutine)
     // 获取下一个任务
     CheckWatchdog();
     CO_EnterCriticalSection();
-    sleep_ms          = GetSleepTask(coroutine, now);
-    n                 = GetNextTask(coroutine);
-    coroutine->isIdle = n == nullptr;
+    sleep_ms = GetSleepTask(coroutine, now);
+    n        = GetNextTask(coroutine);
+    SetThreadIdle(coroutine, n == nullptr);
+    bool isSleep = sleep_ms > 1 && Inter.events->Idle != nullptr;
     if (n) {
         C_Static.RunNum++;
 #if COROUTINE_ENABLE_PRINT_INFO
@@ -659,14 +685,12 @@ static void _Task(CO_Thread *coroutine)
         coroutine->task_start_time = now;
 #endif
         CheckSuccessorTask();
-    }
+    } else if (isSleep)
+        C_Static.SleepNum++;
     CO_LeaveCriticalSection();
     if (n == nullptr) {
         // 运行空闲任务
-        if (sleep_ms > 1 && Inter.events->Idle != nullptr) {
-            CO_EnterCriticalSection();
-            C_Static.SleepNum++;
-            CO_LeaveCriticalSection();
+        if (isSleep) {
             Inter.events->Idle(sleep_ms - 1, Inter.events->object);
             CO_EnterCriticalSection();
             C_Static.SleepNum--;
@@ -685,12 +709,11 @@ static void _Task(CO_Thread *coroutine)
     }
 #endif
     // 添加到运行列表
-    int co_id = -1;
     CO_EnterCriticalSection();
     n->isRuning = 0;   // 清除运行标志
     // 线程空闲
     coroutine->idx_task = nullptr;
-    coroutine->isIdle   = 1;
+    SetThreadIdle(coroutine, true);
     C_Static.RunNum--;
     coroutine->task_start_time = Inter.GetMillisecond();
     // 加入任务列表
@@ -1991,6 +2014,11 @@ static void SetInter(const Coroutine_Inter *inter)
     CM_RBTree_Init(&C_Static.watchdogs, __watchdogs_cm_rbtree_callback_compare);
     // 默认堆栈大小
     C_Static.def_stack_size = coroutine_get_stack_default_size();
+    // 空闲线程掩码
+    int idle_mask_size = ALIGN(inter->thread_count, 32) * 4;
+    C_Static.idle_mask = (uint32_t *)Inter.Malloc(idle_mask_size, __FILE__, __LINE__);
+    if (C_Static.idle_mask == nullptr) ERROR_MEMORY_ALLOC(__FILE__, __LINE__, idle_mask_size);
+    memset(C_Static.idle_mask, 0, idle_mask_size);
     // 初始化完成，启动线程
     for (uint16_t i = 0; i < inter->thread_count; i++)
         C_Static.coroutines[i]->isRun = true;
