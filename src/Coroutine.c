@@ -1381,7 +1381,15 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         return 0;
     max_size--;
     int idx = 0;
-    idx += co_snprintf(buf + idx, max_size - idx, "Sleep %u Run %u\r\n", C_Static.SleepNum, C_Static.RunNum);
+    CO_EnterCriticalSection();
+    idx += co_snprintf(buf + idx,
+                       max_size - idx,
+                       "------------------------------- Thead %-4u Sleep %-4u Run %-4u Wait %-4u ------------------------------\r\n",
+                       Inter.thread_count,
+                       C_Static.SleepNum,
+                       C_Static.RunNum,
+                       C_Static.wait_run_standalone_task_count);
+    CO_LeaveCriticalSection();
     // ---------------------------------- 标题 ----------------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     if (sizeof(size_t) == 4)
@@ -1526,6 +1534,9 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     }
     CO_APP_LEAVE(C_Static.cs_mailboxes);
+    idx += co_snprintf(buf + idx,
+                       max_size - idx,
+                       "-------------------------------------------------------------------------------------------------------\r\n");
     return idx;
 }
 
