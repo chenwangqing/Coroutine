@@ -184,8 +184,10 @@ struct _CO_Thread
     uint64_t             task_start_time;   // 任务开始时间
 
 #if COROUTINE_ENABLE_PRINT_INFO
-    uint64_t start_time;   // 启动时间
-    uint64_t sleep_time;   // 休眠时间
+    uint64_t start_time;            // 启动时间
+    uint64_t sleep_time;            // 休眠时间
+    uint64_t schedule_count;        // 调度次数
+    uint64_t schedule_start_time;   // schedule_count 记录时间
 #endif
 
     CM_RBTree_t tasks_sleep;   // 睡眠任务列表 CO_TCB
@@ -560,6 +562,7 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
     task->isRuning      = 1;   // 设置运行标志
     coroutine->idx_task = task;
 #if COROUTINE_ENABLE_PRINT_INFO
+    coroutine->schedule_count++;
     if (task->execv_time) {
         uint64_t tv = Inter.GetMillisecond() - task->execv_time;
         task->run_avg_timeout += tv;
@@ -1480,26 +1483,36 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         CO_LeaveCriticalSection();
     }
     // 显示线程信息
+    uint64_t num_schedule_count = 0;
     CM_NodeLink_Foreach_Positive(CO_Thread, link, C_Static.threads, coroutine)
     {
         uint64_t tv = Inter.GetMillisecond() - coroutine->start_time;
         if (tv == 0)
             tv = 1;
         CO_EnterCriticalSection();
-        uint64_t run_time = tv - coroutine->sleep_time;
-        void *   task     = coroutine->idx_task;
+        uint64_t run_time              = tv - coroutine->sleep_time;
+        void *   task                  = coroutine->idx_task;
+        uint64_t schedule_count        = coroutine->schedule_count;
+        uint64_t schedule_start_time   = coroutine->schedule_start_time;
+        coroutine->schedule_count      = 0;
+        coroutine->schedule_start_time = Inter.GetMillisecond();
         CO_LeaveCriticalSection();
+        schedule_start_time = Inter.GetMillisecond() - schedule_start_time;
+        schedule_count      = schedule_start_time == 0 ? 0 : schedule_count * 1000 / schedule_start_time;
+        num_schedule_count += schedule_count;
         uint64_t a = run_time * 1000 / tv;
         idx += co_snprintf(buf + idx,
                            max_size - idx,
-                           "ThreadId: %llX(%u) RunTime: %llu(%d.%d%%) ms RunTask: %p\r\n",
+                           "ThreadId: %llX(%u) RunTime: %llu(%d.%d%%) ms Schedule: %llu RunTask: %p\r\n",
                            (uint64_t)coroutine->ThreadId,
                            coroutine->co_id,
                            run_time,
                            (int)(a / 10),
                            (int)(a % 10),
+                           schedule_count,
                            task);
     }
+    idx += co_snprintf(buf + idx, max_size - idx, " Total scheduling times %llu/s\r\n", num_schedule_count);
     // ----------------------------- 信号 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
@@ -1956,7 +1969,7 @@ static Coroutine_Handle Coroutine_Create(size_t id)
     CM_ZERO(c);
     c->isRun = false;
 #if COROUTINE_ENABLE_PRINT_INFO
-    c->task_start_time = c->start_time = Inter.GetMillisecond();
+    c->schedule_start_time = c->task_start_time = c->start_time = Inter.GetMillisecond();
 #endif
     c->ThreadId = id;
     CM_RBTree_Init(&c->tasks_sleep, __tasks_sleep_cm_rbtree_callback_compare);

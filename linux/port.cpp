@@ -177,7 +177,7 @@ public:
     }
 };
 
-static IdleNode *idle_node[MAX_THREADS];
+static IdleNode *idle_node = nullptr;
 
 static Coroutine_Events events = {
     nullptr,
@@ -186,12 +186,11 @@ static Coroutine_Events events = {
         return;
     },
     [](uint32_t time, void *object) -> void {
-        int idx = Coroutine.GetCurrentCoroutineIdx();
-        idle_node[idx]->Idle(time);
+        idle_node->Idle(time);
         return;
     },
-    [](uint16_t co_id, void *object) -> void {
-        idle_node[co_id]->WeakUp();
+    [](void *object) -> void {
+        idle_node->WeakUp();
         return;
     },
     [](void                      *object,
@@ -230,9 +229,7 @@ static const Coroutine_Inter Inter = {
 const Coroutine_Inter *GetInter(void)
 {
     memory_critical_section = __CreateLock();
-    for (int i = 0; i < MAX_THREADS; i++) {
-        idle_node[i] = new IdleNode();
-    }
+    idle_node               = new IdleNode();
     return &Inter;
 }
 
