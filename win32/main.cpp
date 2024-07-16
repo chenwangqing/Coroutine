@@ -117,15 +117,22 @@ void Task4(void *obj)
 {
     while (true) {
         Coroutine.FeedDog(30 * 1000);
-        int ms = (rand() % 250) + 250;
+        int ms = (rand() % 15) + 2;
         Coroutine.YieldDelay(ms);
         auto data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
         if (!data.isOk || data.size == 0) continue;
-        printf("[%llu][4]mail1 recv: %llu %.*s\n",
+        char    *str = (char *)data.data;
+        uint64_t tv  = 0;
+        if (memcmp(str, "time", 4) == 0) {
+            uint64_t ts = strtoull(str + 5, nullptr, 10);
+            tv          = Coroutine.GetMillisecond() - ts;
+        }
+        printf("[%llu][4]mail1 recv: %llu %.*s %llu\n",
                Coroutine.GetMillisecond(),
                data.id,
                data.size,
-               (char *)data.data);
+               str,
+               tv);
         Coroutine.Free((void *)data.data, __FILE__, __LINE__);
 #if EN_SLEEP
         Sleep(2);
@@ -193,7 +200,8 @@ DWORD WINAPI ThreadProc_test2(LPVOID lpParam)
     uint64_t last_count  = 0;
     uint64_t last_count2 = 0;
     while (true) {
-        std::string str = "hello:" + std::to_string(last_count);
+        std::string str = "time:" + std::to_string(Coroutine.GetMillisecond());
+        printf("[%llu] Send %s\n", Coroutine.GetMillisecond(), str.c_str());
 #if 01
         char *buf = (char *)Coroutine.Malloc(str.size() + 1, __FILE__, __LINE__);
         memcpy(buf, str.c_str(), str.size() + 1);

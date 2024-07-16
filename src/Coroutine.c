@@ -59,6 +59,9 @@ struct _SemaphoreNode
  */
 typedef struct _C_MailData
 {
+#if COROUTINE_ENABLE_PRINT_INFO
+    uint64_t start_time;   // 开始时间
+#endif
     uint64_t      expiration_time;   // 过期时间
     uint64_t      eventId;           // 事件id
     uint64_t      data;              // 邮件数据
@@ -205,6 +208,9 @@ struct _CO_Mailbox
     CM_NodeLinkList_t waits;        // 等待列表 MailWaitNode
     CM_NodeLink_t     link;         // _CO_Mailbox
     CO_CS             cs;           // 临界区
+#if COROUTINE_ENABLE_PRINT_INFO
+    uint32_t max_wait_time;   // 最大等待时间
+#endif
 };
 
 struct _CO_ASync
@@ -1048,6 +1054,9 @@ static Coroutine_MailData *MakeMessage(uint64_t eventId,
     dat->size            = size;
     dat->eventId         = eventId;
     dat->expiration_time = Inter.GetMillisecond() + time;
+#if COROUTINE_ENABLE_PRINT_INFO
+    dat->start_time = Inter.GetMillisecond();
+#endif
     CM_NodeLink_Init(&dat->link);
     return dat;
 }
@@ -1281,6 +1290,13 @@ static Coroutine_MailResult ReceiveMail(Coroutine_Mailbox mb,
     }
     CO_APP_LeaveCriticalSection();
 END:
+#if COROUTINE_ENABLE_PRINT_INFO
+    if (dat) {
+        uint64_t tv = Inter.GetMillisecond() - dat->start_time;
+        if (tv > mb->max_wait_time)
+            mb->max_wait_time = (uint32_t)tv;
+    }
+#endif
     CO_APP_LEAVE(mb->cs);
     if (dat) {
         ret.data = dat->data;
@@ -1531,6 +1547,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     idx += co_snprintf(buf + idx, max_size - idx, "used         ");
     idx += co_snprintf(buf + idx, max_size - idx, "total   ");
     idx += co_snprintf(buf + idx, max_size - idx, "Wait    ");
+    idx += co_snprintf(buf + idx, max_size - idx, "MaxWaitTime");
     idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
     sn = 0;
     CO_APP_ENTER(C_Static.cs_mailboxes);
@@ -1541,7 +1558,9 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%8u|%-4u ", mb->total - mb->size, mb->mail_count);
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->total);
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->wait_count);
+        idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", mb->max_wait_time);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
+        mb->max_wait_time = 0;
     }
     CO_APP_LEAVE(C_Static.cs_mailboxes);
     // ----------------------------- 互斥 -----------------------------
@@ -1566,6 +1585,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         idx += co_snprintf(buf + idx, max_size - idx, "%-8u ", m->wait_count);
         idx += co_snprintf(buf + idx, max_size - idx, "%u ", m->max_wait_time);
         idx += co_snprintf(buf + idx, max_size - idx, "\r\n");
+        m->max_wait_time = 0;
     }
     CO_APP_LEAVE(C_Static.cs_mailboxes);
     idx += co_snprintf(buf + idx,
@@ -2136,7 +2156,7 @@ static void FeedDog(uint32_t time)
     if (time == 0)
         task->watchdog->expiration_time = 0;
     else
-        task->watchdog->expiration_time = GetMillisecond() + time;
+        task->watchdog->expiration_time = Inter.GetMillisecond() + time;
     CO_LeaveCriticalSection();
     if (task->watchdog->expiration_time) {
         // 添加到新的列表
