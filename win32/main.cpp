@@ -30,13 +30,23 @@ static uint64_t Task1_func1(uint32_t timeout)
     return ts;
 }
 
+void Task_PrintInfo(void* obj)
+{
+    char* str_buf = new char[4 * 1024];
+    while (true) {
+        Coroutine.FeedDog(30 * 1000);
+        Coroutine.YieldDelay(1000);
+        PrintMemory();
+        Coroutine.PrintInfo(str_buf, 4 * 1024);
+        printf("%s", str_buf);
+    }
+}
+
 void Task1(void *obj)
 {
     int   i       = 0;
-    char *str_buf = new char[4 * 1024];
     while (true) {
         Coroutine.FeedDog(30 * 1000);
-        PrintMemory();
         std::string str = "hello";
         int         ms  = (rand() % 550) + 250;
         uint64_t    ts  = Task1_func1(ms);
@@ -51,8 +61,6 @@ void Task1(void *obj)
 #if EN_SLEEP
         Sleep(100);
 #endif
-        Coroutine.PrintInfo(str_buf, 4 * 1024);
-        printf("%s", str_buf);
     }
     return;
 }
@@ -84,7 +92,7 @@ void Task3(void *obj)
         int     *a   = (int *)obj;
         uint64_t now = Coroutine.GetMillisecond();
 #if EN_SLEEP
-        Sleep(2);
+        Sleep(20);
 #endif
         a[1] = (rand() % 150) + 0;
         Coroutine.YieldDelay(a[1]);
@@ -99,7 +107,7 @@ void Task3(void *obj)
             continue;
         printf("[%llu][3]sem1 signal\n", Coroutine.GetMillisecond());
 #if EN_SLEEP
-        Sleep(1);
+        Sleep(5);
 #endif
         if (re && Coroutine.AsyncWait(re, 100)) {
             int *b = (int *)Coroutine.AsyncGetResultAndDelete(re);
@@ -135,7 +143,7 @@ void Task4(void *obj)
                tv);
         Coroutine.Free((void *)data.data, __FILE__, __LINE__);
 #if EN_SLEEP
-        Sleep(2);
+        Sleep(5);
 #endif
     }
     return;
@@ -189,6 +197,7 @@ volatile uint64_t g_count2 = 0;
 static void Task7(void *obj)
 {
     while (true) {
+        // Sleep(100);
         g_count++;
         Coroutine.Yield();
     }
@@ -228,6 +237,7 @@ static void Task_Channel1(void *obj)
     uint64_t now   = Coroutine.GetMillisecond();
     uint64_t total = 0, count = 0;
     while (true) {
+        // Sleep(100);
         Coroutine.WriteChannel(ch1, num + 1, UINT32_MAX);
         Coroutine.ReadChannel(ch1, &num, UINT32_MAX);
         if (Coroutine.GetMillisecond() - now >= 1000) {
@@ -255,6 +265,7 @@ static void Task_Channel3(void *obj)
     uint64_t now   = Coroutine.GetMillisecond();
     uint64_t total = 0, count = 0;
     while (true) {
+       // Sleep(10);
         Coroutine.WriteChannel(ch2, num + 1, UINT32_MAX);
         Coroutine.ReadChannel(ch2, &num, UINT32_MAX);
         if (Coroutine.GetMillisecond() - now >= 1000) {
@@ -314,6 +325,7 @@ static void Task10(void)
             return a + b;
         };
         CO::Async<int> tmp(0, func, a, b);
+        Sleep(10);
         ch->Write(num + 1);
         tmp.Wait();
         num = ch->Read();
@@ -352,6 +364,7 @@ int main()
     int num        = 0;
     int stack_size = 1024 * 16;
 
+#if 1
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task1, nullptr, TASK_PRI_NORMAL, stack_size, "Task1", nullptr);
     Sleep(rand() % 1000);
@@ -377,6 +390,20 @@ int main()
 
     //  CreateThread(NULL, 0, ThreadProc_test, NULL, 0, NULL);
     CreateThread(NULL, 0, ThreadProc_test2, NULL, 0, NULL);
+#else
+    auto func = [](void* obj)->void {
+        while (true)
+        {
+            Sleep(100);
+            Coroutine.YieldDelay(1000);
+            printf("[%llu][%p]\n", Coroutine.GetMillisecond(), Coroutine.GetCurrentTaskId());
+        }
+    };
+    for (int i = 0; i < inter->thread_count + 1; i++) {
+        Coroutine.AddTask(func, nullptr, TASK_PRI_NORMAL, stack_size, nullptr, nullptr);
+    }
+#endif
+    Coroutine.AddTask(Task_PrintInfo, nullptr, TASK_PRI_NORMAL, stack_size, "PrintInfo", nullptr);
     while (true) {
         Sleep(100);
     }

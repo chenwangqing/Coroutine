@@ -179,6 +179,6 @@ const Coroutine_Inter *GetInter(void)
 
 void PrintMemory(void)
 {
-    printf("Memory used: %lld bytes, max used: %lld bytes\n", memory.used, memory.max_used);
+    printf("[%llu]Memory used: %lld bytes, max used: %lld bytes\n", GetMillisecond(), memory.used, memory.max_used);
     return;
 }

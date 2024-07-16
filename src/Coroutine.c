@@ -157,6 +157,7 @@ struct _CO_TCB
     STACK_TYPE *   stack;                // 栈缓存
 #if COROUTINE_ENABLE_PRINT_INFO
     uint64_t run_time;                // 运行时间
+    uint32_t run_max_timeout;         // 运行超时
     uint32_t run_avg_timeout;         // 运行超时
     uint32_t run_avg_timeout_count;   // 运行超时次数
 #endif
@@ -399,18 +400,16 @@ static void CheckStack(volatile CO_TCB *t)
  */
 static void WakeIdleThread()
 {
+    if (C_Static.SleepNum < Inter.thread_count - C_Static.RunNum)
+        return;   // 有空闲的线程
 #if 1
     bool isOk = false;
-    if (C_Static.RunNum <= C_Static.wait_run_standalone_task_count &&
-        C_Static.SleepNum == Inter.thread_count - C_Static.RunNum) {
+    if (C_Static.RunNum <= C_Static.wait_run_standalone_task_count) {
         // 其他任务都休眠了，检查是否有后续任务
         isOk = true;
     }
     if (!isOk) return;
 #else
-    // 检查是否有空闲线程
-    if (C_Static.SleepNum < Inter.thread_count - C_Static.RunNum)
-        return;   // 有空闲的线程
     if (C_Static.wait_run_standalone_task_count == 0)
         return;   // 没有后续任务
 #endif
@@ -565,6 +564,8 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
     coroutine->schedule_count++;
     if (task->execv_time) {
         uint64_t tv = Inter.GetMillisecond() - task->execv_time;
+        if (tv > task->run_max_timeout)
+            task->run_max_timeout = tv;
         task->run_avg_timeout += tv;
         task->run_avg_timeout_count++;
         task->execv_time = 0;
@@ -694,13 +695,13 @@ static void _Task(CO_Thread *coroutine)
     uint64_t tv = now <= coroutine->task_start_time ? 0 : now - coroutine->task_start_time;
     if (tv) n->run_time += tv;
 #endif
+    // 线程空闲
+    coroutine->idx_task = nullptr;
+    coroutine->task_start_time = now;
     // 添加到运行列表
     CO_EnterCriticalSection();
     n->isRuning = 0;   // 清除运行标志
-    // 线程空闲
-    coroutine->idx_task = nullptr;
     C_Static.RunNum--;
-    coroutine->task_start_time = now;
     // 加入任务列表
     AddTaskList((CO_TCB *)n, n->priority, coroutine);
     CO_LeaveCriticalSection();
@@ -1374,11 +1375,16 @@ static int _PrintInfoTask(char *   buf,
             idx += co_snprintf(buf + idx, max_size - idx, "%-10u ", (uint32_t)(tv));
         if (idx >= max_size)
             break;
-        idx += co_snprintf(buf + idx, max_size - idx, "%-11u ", p->run_avg_timeout_count == 0 ? 0 : p->run_avg_timeout / p->run_avg_timeout_count);
+        idx += co_snprintf(buf + idx,
+                           max_size - idx,
+                           "%4u/%-4u ",
+                           p->run_avg_timeout_count == 0 ? 0 : p->run_avg_timeout / p->run_avg_timeout_count,
+                           p->run_max_timeout);
         if (p->run_avg_timeout_count > (UINT32_MAX >> 1)) {
             p->run_avg_timeout       = p->run_avg_timeout / p->run_avg_timeout_count;
             p->run_avg_timeout_count = 1;
         }
+        p->run_max_timeout = 0;
         if (idx >= max_size)
             break;
         tv = p->watchdog == nullptr ? 0 : p->watchdog->expiration_time - Inter.GetMillisecond();
@@ -1464,7 +1470,10 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
     }
     isPrint = !isPrint;
     CO_LeaveCriticalSection();
-    int count = 0;
+    int             count                 = 0;
+    uint64_t        max_timeout           = 0;
+    static uint64_t avg_max_timeout       = 0;
+    static uint32_t avg_max_timeout_count = 0;
     while (true) {
         CO_EnterCriticalSection();
         if (CM_NodeLink_IsEmpty(C_Static.task_list)) {
@@ -1478,9 +1487,15 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         }
         // 设置下一个打印节点
         CM_NodeLink_Next(C_Static.task_list);
+        max_timeout += task->run_max_timeout;
         idx += _PrintInfoTask(buf + idx, max_size - idx, task, max_stack, max_run, count++, run_time);
         task->isPrint = isPrint;   // 设置已打印标志
         CO_LeaveCriticalSection();
+    }
+    if (count) {
+        max_timeout = max_timeout / count;
+        avg_max_timeout += max_timeout;
+        avg_max_timeout_count++;
     }
     // 显示线程信息
     uint64_t num_schedule_count = 0;
@@ -1512,7 +1527,12 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
                            schedule_count,
                            task);
     }
-    idx += co_snprintf(buf + idx, max_size - idx, " Total scheduling times %llu/s\r\n", num_schedule_count);
+    idx += co_snprintf(buf + idx,
+                       max_size - idx,
+                       " Total scheduling times %llu/s AvgMaxTimeout: %u/%u ms\r\n",
+                       num_schedule_count,
+                       (uint32_t)max_timeout,
+                       avg_max_timeout_count == 0 ? 0 : (uint32_t)(avg_max_timeout / avg_max_timeout_count));
     // ----------------------------- 信号 -----------------------------
     idx += co_snprintf(buf + idx, max_size - idx, " SN  ");
     idx += co_snprintf(buf + idx, max_size - idx, "             Name              ");
@@ -2237,6 +2257,8 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
             ChannelWaitNode *n = CM_Field_ToType(ChannelWaitNode, link, CM_NodeLink_First(ch->waits));
             // 移除等待列表
             CM_NodeLink_Remove(&ch->waits, &n->link);
+            CO_APP_LEAVE(ch->cs);
+
             // 清除标志
             CO_APP_EnterCriticalSection();
             n->task->execv_time    = 0;
@@ -2257,9 +2279,10 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
             CM_ZERO(dat);
             dat->data = data;
             CM_NodeLink_Insert(&ch->caches, CM_NodeLink_End(ch->caches), &dat->link);
+            ch->size--;
+            CO_APP_LEAVE(ch->cs);
             // 发送完成
             isOk = true;
-            ch->size--;
         } else {
             // 加入发送列表
             ChannelWaitNode *n = &tmp;
@@ -2273,18 +2296,18 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
             // 设置任务超时
             CO_SET_TASK_TIME(task, tv);
             CO_APP_LeaveCriticalSection();
+            CO_APP_LEAVE(ch->cs);
         }
-        CO_APP_LEAVE(ch->cs);
         // 等待
         _Yield();
         if (isOk) break;
         CO_APP_ENTER(ch->cs);
-        CO_APP_EnterCriticalSection();
         if (task->isWaitChannel) {
             CM_NodeLink_Remove(&ch->senders, &tmp.link);
+            CO_APP_EnterCriticalSection();
             task->isWaitChannel = 0;
+            CO_APP_LeaveCriticalSection();
         }
-        CO_APP_LeaveCriticalSection();
         isOk = tmp.isOk;
         CO_APP_LEAVE(ch->cs);
     } while (!isOk && (Inter.GetMillisecond() - now) < timeout);
@@ -2314,23 +2337,27 @@ static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
         if (!CM_NodeLink_IsEmpty(ch->caches)) {
             // 检查缓存
             ChannelDataNode *dat = CM_Field_ToType(ChannelDataNode, link, CM_NodeLink_First(ch->caches));
-            *data                = dat->data;
             // 移除缓存
             CM_NodeLink_Remove(&ch->caches, &dat->link);
+            ch->size++;
+            CO_APP_LEAVE(ch->cs);
+            // 获取数据
+            *data = dat->data;
             // 释放内存
             Inter.Free(dat, __FILE__, __LINE__);
             // 接收完成
             isOk = true;
-            ch->size++;
         } else if (!CM_NodeLink_IsEmpty(ch->senders)) {
             // 获取数据
             ChannelWaitNode *n = CM_Field_ToType(ChannelWaitNode, link, CM_NodeLink_First(ch->senders));
             // 移除发送列表
             CM_NodeLink_Remove(&ch->senders, &n->link);
+            CO_APP_LEAVE(ch->cs);
+
+            *data = n->data;
             CO_APP_EnterCriticalSection();
             // 清除标志
             n->task->isWaitChannel = 0;
-            *data                  = n->data;
             n->isOk                = true;
             // 设置执行时间
             CO_SET_TASK_TIME(n->task, 0);
@@ -2351,23 +2378,23 @@ static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
             // 设置任务超时
             CO_SET_TASK_TIME(task, tv);
             CO_APP_LeaveCriticalSection();
+            CO_APP_LEAVE(ch->cs);
         }
-        CO_APP_LEAVE(ch->cs);
         // 等待
         _Yield();
         if (isOk) break;
         CO_APP_ENTER(ch->cs);
-        CO_APP_EnterCriticalSection();
         if (task->isWaitChannel) {
             // 移除等待列表
             CM_NodeLink_Remove(&ch->waits, &tmp.link);
+            CO_APP_EnterCriticalSection();
             task->isWaitChannel = 0;
+            CO_APP_LeaveCriticalSection();
         }
         if (tmp.isOk) {
             *data = tmp.data;
             isOk  = true;
         }
-        CO_APP_LeaveCriticalSection();
         CO_APP_LEAVE(ch->cs);
     } while (!isOk && (Inter.GetMillisecond() - now) < timeout);
     return isOk;
