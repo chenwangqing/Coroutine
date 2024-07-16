@@ -279,7 +279,7 @@ typedef struct
     uint64_t (*GetMillisecond)(void);
 
     /**
-     * @brief    获取线程id
+     * @brief    获取线程id(进入中断时要单独分配一个线程id)
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-28
      */

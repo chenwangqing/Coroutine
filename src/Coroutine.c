@@ -1167,9 +1167,11 @@ static bool SendMail(Coroutine_Mailbox mb,
                 n->data = dat;
                 // 开始执行
                 CO_APP_EnterCriticalSection();
-                CO_TCB *task     = (CO_TCB *)n->task;
+                CO_TCB *task = (CO_TCB *)n->task;
+                // 设置执行时间
                 task->execv_time = 0;
                 task->isWaitMail = 0;
+                // 添加到任务列表
                 AddTaskList(task, task->priority, c);
                 CO_APP_LeaveCriticalSection();
                 dat = nullptr;
@@ -2116,6 +2118,7 @@ static void FeedDog(uint32_t time)
         task->watchdog = (WatchdogNode *)Inter.Malloc(sizeof(WatchdogNode), __FILE__, __LINE__);
         if (task->watchdog == nullptr) ERROR_MEMORY_ALLOC(__FILE__, __LINE__, sizeof(WatchdogNode));
         CM_ZERO(task->watchdog);
+        task->watchdog->task = task;
     }
     // 从已有的列表中删除
     CO_APP_ENTER(C_Static.cs_watchdogs);
