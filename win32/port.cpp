@@ -106,8 +106,8 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
 
 #define MAX_THREADS 6
 
-static HANDLE sem_sleep[MAX_THREADS];
-static int    num_sem_sleep[MAX_THREADS];
+static HANDLE sem_sleep;
+static int    num_sem_sleep = 0;
 
 static Coroutine_Events events = {
     nullptr,
@@ -118,23 +118,20 @@ static Coroutine_Events events = {
     [](uint32_t time, void *object) -> void {
         int idx = Coroutine.GetCurrentCoroutineIdx();
         EnterCriticalSection(&memory_critical_section);
-        bool isOk = num_sem_sleep[idx] > 0;
-        num_sem_sleep[idx]--;
+        num_sem_sleep++;
         LeaveCriticalSection(&memory_critical_section);
-        if (isOk) return;
-        WaitForSingleObject(sem_sleep[idx], time);
+        WaitForSingleObject(sem_sleep, time);
         EnterCriticalSection(&memory_critical_section);
-        num_sem_sleep[idx] = 0;
+        num_sem_sleep--;
         LeaveCriticalSection(&memory_critical_section);
         return;
     },
-    [](uint16_t co_id, void *object) -> void {
+    []( void *object) -> void {
         EnterCriticalSection(&memory_critical_section);
-        bool isWait = num_sem_sleep[co_id] < 0;
-        num_sem_sleep[co_id]++;
+        bool isWait = num_sem_sleep > 0;
         LeaveCriticalSection(&memory_critical_section);
         if (isWait)
-            ReleaseSemaphore(sem_sleep[co_id], 1, NULL);
+            ReleaseSemaphore(sem_sleep, 1, NULL);
         return;
     },
     [](void                      *object,
@@ -172,14 +169,11 @@ static const Coroutine_Inter Inter = {
 const Coroutine_Inter *GetInter(void)
 {
     InitializeCriticalSection(&memory_critical_section);
-    for (int i = 0; i < MAX_THREADS; i++) {
-        sem_sleep[i] = CreateSemaphore(
-            NULL,    // 默认安全属性
-            0,       // 初始计数
-            1024,    // 最大计数
-            NULL);   // 未命名信号量
-        num_sem_sleep[i] = 0;
-    }
+    sem_sleep = CreateSemaphore(
+        NULL,    // 默认安全属性
+        0,       // 初始计数
+        1024,    // 最大计数
+        NULL);   // 未命名信号量
     return &Inter;
 }
 

@@ -196,7 +196,7 @@ typedef void (*Coroutine_Period_Event)(void *object);
 // 空闲事件（可用于低功耗休眠）
 typedef void (*Coroutine_Idle_Event)(uint32_t time, void *object);
 // 线程空闲唤醒
-typedef void (*Coroutine_Wake_Event)(uint16_t co_id, void *object);
+typedef void (*Coroutine_Wake_Event)(void *object);
 // 异步任务
 typedef void *(*Coroutine_AsyncTask)(void *arg);
 // 错误事件

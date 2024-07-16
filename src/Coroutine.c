@@ -156,7 +156,9 @@ struct _CO_TCB
     CO_Thread *    coroutine;            // 父节点
     STACK_TYPE *   stack;                // 栈缓存
 #if COROUTINE_ENABLE_PRINT_INFO
-    uint64_t run_time;   // 运行时间
+    uint64_t run_time;                // 运行时间
+    uint32_t run_avg_timeout;         // 运行超时
+    uint32_t run_avg_timeout_count;   // 运行超时次数
 #endif
 
     WatchdogNode *watchdog;   // 看门狗节点
@@ -266,7 +268,6 @@ static struct
     uint16_t          ThreadAllocNum;                           // 线程分配数量
     uint16_t          SleepNum;                                 // 休眠数量
     uint16_t          RunNum;                                   // 运行数量(正在运行任务)
-    uint32_t *        idle_mask;                                // 空闲线程掩码
 
 #if COROUTINE_BLOCK_CRITICAL_SECTION
     CO_CS cs_semaphores;   // 临界区
@@ -281,13 +282,7 @@ static struct
 #define CO_LeaveCriticalSection() Inter.LeaveCriticalSection(C_Static.cs, __FILE__, __LINE__)
 
 // 设置任务执行时间
-#define CO_SET_TASK_TIME(task, time)                          \
-    do {                                                      \
-        if (time)                                             \
-            task->execv_time = time + Inter.GetMillisecond(); \
-        else                                                  \
-            task->execv_time = 0;                             \
-    } while (false)
+#define CO_SET_TASK_TIME(task, time) (task)->execv_time = (time) + Inter.GetMillisecond()
 
 #if COROUTINE_ENABLE_SEMAPHORE
 static void DeleteMessage(Coroutine_MailData *dat);
@@ -395,23 +390,6 @@ static void CheckStack(volatile CO_TCB *t)
 #endif
 
 /**
- * @brief    设置线程的空闲状态
- * @param    c              
- * @param    isIdle         
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2024-07-15
- */
-static inline void SetThreadIdle(CO_Thread *c, bool isIdle)
-{
-    int idx = c->co_id;
-    if (isIdle)
-        C_Static.idle_mask[idx >> 5] |= 0x01 << (idx & 0x1F);
-    else
-        C_Static.idle_mask[idx >> 5] &= ~(0x01 << (idx & 0x1F));
-    return;
-}
-
-/**
  * @brief    获取可能休眠的线程
  * @return   * CO_Thread*
  * @author   CXS (chenxiangshu@outlook.com)
@@ -419,25 +397,23 @@ static inline void SetThreadIdle(CO_Thread *c, bool isIdle)
  */
 static void WakeIdleThread()
 {
-    int idx = -1;
-    for (size_t i = 0; i < Inter.thread_count; i += 32) {
-        if (C_Static.idle_mask[i >> 5] == 0)
-            continue;
-        register uint32_t index = C_Static.idle_mask[i >> 5];
-        //将第一个为1位的低位都置1，其它位都置0
-        index = (index - 1) & ~index;
-        //得到有多少为1的位
-        index = (index & 0x55555555) + ((index >> 1) & 0x55555555);
-        index = (index & 0x33333333) + ((index >> 2) & 0x33333333);
-        index = (index & 0x0F0F0F0F) + ((index >> 4) & 0x0F0F0F0F);
-        index = (index & 0xFF) + ((index & 0xFF00) >> 8) + ((index & 0xFF0000) >> 16) + ((index & 0xFF000000) >> 24);
-        //得到位数,如果为32则表示全0
-        idx = (int)(index);
+#if 1
+    bool isOk = false;
+    if (C_Static.RunNum <= C_Static.wait_run_standalone_task_count &&
+        C_Static.SleepNum == Inter.thread_count - C_Static.RunNum) {
+        // 其他任务都休眠了，检查是否有后续任务
+        isOk = true;
     }
-    if (idx < 0)
-        return;
+    if (!isOk) return;
+#else
+    // 检查是否有空闲线程
+    if (C_Static.SleepNum < Inter.thread_count - C_Static.RunNum)
+        return;   // 有空闲的线程
+    if (C_Static.wait_run_standalone_task_count == 0)
+        return;   // 没有后续任务
+#endif
     if (Inter.events->wake)
-        Inter.events->wake(C_Static.coroutines[idx]->co_id, Inter.events->object);
+        Inter.events->wake(Inter.events->object);
     return;
 }
 
@@ -505,11 +481,12 @@ static void AddTaskList(CO_TCB *task, uint8_t new_pri, CO_Thread *work)
         task->priority = new_pri;                   // 更新优先级
     if (task->isDel || now >= task->execv_time) {   // 加入运行列表
         // 独立栈，加入公共列表
-        task->coroutine = nullptr;
+        task->coroutine    = nullptr;
+        task->isAddRunList = 1;
+        if (task->execv_time == 0) task->execv_time = now;
         CM_NodeLink_Insert(&C_Static.standalone_tasks_run[task->priority],
                            CM_NodeLink_End(C_Static.standalone_tasks_run[task->priority]),
                            &task->run_link);
-        task->isAddRunList = 1;
         C_Static.wait_run_standalone_task_count++;
         // 唤醒其他
         if (!isOldRun && work == nullptr)
@@ -582,26 +559,20 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
     task->coroutine     = coroutine;
     task->isRuning      = 1;   // 设置运行标志
     coroutine->idx_task = task;
+#if COROUTINE_ENABLE_PRINT_INFO
+    if (task->execv_time) {
+        uint64_t tv = Inter.GetMillisecond() - task->execv_time;
+        task->run_avg_timeout += tv;
+        task->run_avg_timeout_count++;
+        task->execv_time = 0;
+    }
+#endif
     return task;
 }
 
-static void CheckSuccessorTask(void)
+static inline void CheckSuccessorTask(void)
 {
-#if 0
-    // 检查是否有空闲线程
-    if (C_Static.SleepNum < Inter.thread_count - C_Static.RunNum)
-        return;   // 有空闲的线程
-    if (C_Static.wait_run_standalone_task_count == 0)
-        return;         // 没有后续任务
-    WakeIdleThread();   // 后续还有任务，唤醒其他线程
-#else
-    if (C_Static.RunNum <= C_Static.wait_run_standalone_task_count &&
-        C_Static.SleepNum == Inter.thread_count - C_Static.RunNum) {
-        // 其他任务都休眠了，检查是否有后续任务
-        WakeIdleThread();   // 后续还有任务，唤醒其他线程
-    }
-#endif
-    return;
+    WakeIdleThread();
 }
 
 /**
@@ -689,9 +660,8 @@ static void _Task(CO_Thread *coroutine)
     // 获取下一个任务
     CheckWatchdog();
     CO_EnterCriticalSection();
-    sleep_ms = GetSleepTask(coroutine, now);
-    n        = GetNextTask(coroutine);
-    SetThreadIdle(coroutine, n == nullptr);
+    sleep_ms     = GetSleepTask(coroutine, now);
+    n            = GetNextTask(coroutine);
     bool isSleep = sleep_ms > 1 && Inter.events->Idle != nullptr;
     if (n) {
         C_Static.RunNum++;
@@ -716,21 +686,18 @@ static void _Task(CO_Thread *coroutine)
     // 执行任务
     _enter_into(n);
     // 记录运行时间
+    now = Inter.GetMillisecond();
 #if COROUTINE_ENABLE_PRINT_INFO
-    uint64_t ts = Inter.GetMillisecond();
-    uint64_t tv = ts <= coroutine->task_start_time ? 0 : ts - coroutine->task_start_time;
-    if (tv) {
-        n->run_time += tv;
-    }
+    uint64_t tv = now <= coroutine->task_start_time ? 0 : now - coroutine->task_start_time;
+    if (tv) n->run_time += tv;
 #endif
     // 添加到运行列表
     CO_EnterCriticalSection();
     n->isRuning = 0;   // 清除运行标志
     // 线程空闲
     coroutine->idx_task = nullptr;
-    SetThreadIdle(coroutine, true);
     C_Static.RunNum--;
-    coroutine->task_start_time = Inter.GetMillisecond();
+    coroutine->task_start_time = now;
     // 加入任务列表
     AddTaskList((CO_TCB *)n, n->priority, coroutine);
     CO_LeaveCriticalSection();
@@ -943,7 +910,8 @@ static Coroutine_TaskId AddTask(Coroutine_Task    func,
     n->stack[0]                  = STACK_SENTRY_END;
     n->stack[n->stack_alloc - 1] = STACK_SENTRY_START;
     // 添加到任务列表
-    CO_Thread *c = GetCurrentThread(-1);
+    CO_Thread *c  = GetCurrentThread(-1);
+    n->execv_time = Inter.GetMillisecond();
     CO_EnterCriticalSection();
     CM_NodeLink_Insert(&C_Static.task_list, CM_NodeLink_End(C_Static.task_list), &n->task_list_link);
     AddTaskList(n, n->priority, c);
@@ -1178,7 +1146,7 @@ static bool SendMail(Coroutine_Mailbox mb,
                 CO_APP_EnterCriticalSection();
                 CO_TCB *task = (CO_TCB *)n->task;
                 // 设置执行时间
-                task->execv_time = 0;
+                CO_SET_TASK_TIME(task, 0);
                 task->isWaitMail = 0;
                 // 添加到任务列表
                 AddTaskList(task, task->priority, c);
@@ -1403,6 +1371,13 @@ static int _PrintInfoTask(char *   buf,
             idx += co_snprintf(buf + idx, max_size - idx, "%-10u ", (uint32_t)(tv));
         if (idx >= max_size)
             break;
+        idx += co_snprintf(buf + idx, max_size - idx, "%-11u ", p->run_avg_timeout_count == 0 ? 0 : p->run_avg_timeout / p->run_avg_timeout_count);
+        if (p->run_avg_timeout_count > (UINT32_MAX >> 1)) {
+            p->run_avg_timeout       = p->run_avg_timeout / p->run_avg_timeout_count;
+            p->run_avg_timeout_count = 1;
+        }
+        if (idx >= max_size)
+            break;
         tv = p->watchdog == nullptr ? 0 : p->watchdog->expiration_time - Inter.GetMillisecond();
         if (tv >= (UINT32_MAX >> 1) || p->watchdog == nullptr || p->watchdog->expiration_time == 0)
             idx += co_snprintf(buf + idx, max_size - idx, "----       ");
@@ -1465,6 +1440,7 @@ static int _PrintInfo(char *buf, int max_size, bool isEx)
         buf[idx++] = ' ';
     // 打印等待时间
     idx += co_snprintf(buf + idx, max_size - idx, "WaitTime   ");
+    idx += co_snprintf(buf + idx, max_size - idx, "AvgTimeout ");
     // 打印看门狗时间
     idx += co_snprintf(buf + idx, max_size - idx, "DogTime   ");
     // 打印名称
@@ -1694,8 +1670,10 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
         CO_APP_EnterCriticalSection();
         CO_TCB *task = (CO_TCB *)n->task;
         // 清除等待标志
-        task->isWaitSem  = 0;
-        task->execv_time = 0;
+        task->isWaitSem = 0;
+        // 设置执行时间
+        CO_SET_TASK_TIME(task, 0);
+        // 加入运行列表
         AddTaskList(task, task->priority, c);
         CO_APP_LeaveCriticalSection();
         isOk = true;
@@ -1934,8 +1912,9 @@ static void UnlockMutex(Coroutine_Mutex mutex)
                 mutex->wait_count--;
                 CO_APP_EnterCriticalSection();
                 // 清除等待标志
-                task->execv_time  = 0;
                 task->isWaitMutex = false;
+                // 设置执行时间
+                CO_SET_TASK_TIME(task, 0);
                 // 加入等待列表
                 AddTaskList(task, task->priority, c);
                 CO_APP_LeaveCriticalSection();
@@ -2045,11 +2024,6 @@ static void SetInter(const Coroutine_Inter *inter)
     CM_RBTree_Init(&C_Static.watchdogs, __watchdogs_cm_rbtree_callback_compare);
     // 默认堆栈大小
     C_Static.def_stack_size = coroutine_get_stack_default_size();
-    // 空闲线程掩码
-    int idle_mask_size = ALIGN(inter->thread_count, 32) * 4;
-    C_Static.idle_mask = (uint32_t *)Inter.Malloc(idle_mask_size, __FILE__, __LINE__);
-    if (C_Static.idle_mask == nullptr) ERROR_MEMORY_ALLOC(__FILE__, __LINE__, idle_mask_size);
-    memset(C_Static.idle_mask, 0, idle_mask_size);
     // 初始化完成，启动线程
     for (uint16_t i = 0; i < inter->thread_count; i++)
         C_Static.coroutines[i]->isRun = true;
@@ -2256,6 +2230,8 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
             n->task->isWaitChannel = 0;
             n->data                = data;
             n->isOk                = true;
+            // 设置执行时间
+            CO_SET_TASK_TIME(n->task, 0);
             // 加入运行列表
             AddTaskList(n->task, n->task->priority, c);
             CO_APP_LeaveCriticalSection();
@@ -2340,10 +2316,11 @@ static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
             CM_NodeLink_Remove(&ch->senders, &n->link);
             CO_APP_EnterCriticalSection();
             // 清除标志
-            n->task->execv_time    = 0;
             n->task->isWaitChannel = 0;
             *data                  = n->data;
             n->isOk                = true;
+            // 设置执行时间
+            CO_SET_TASK_TIME(n->task, 0);
             // 加入运行列表
             AddTaskList(n->task, n->task->priority, c);
             CO_APP_LeaveCriticalSection();
