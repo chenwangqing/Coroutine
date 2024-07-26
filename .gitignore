@@ -17,6 +17,8 @@ x64/
 \.[Vv]s/
 Export/
 enc_temp_folder/
+\.cmake/
+\.idea/
 
 # Enable "build/" folder in the NuGet Packages folder since NuGet packages use it for MSBuild targets
 !packages/*/build/
@@ -48,6 +50,7 @@ enc_temp_folder/
 *.pidb
 *.log
 *.scc
+*.cbp
  
 # Visual C++ cache files
 ipch/

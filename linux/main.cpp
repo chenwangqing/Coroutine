@@ -222,6 +222,7 @@ static void Task_Channel2(void *obj)
 
 int main()
 {
+    setbuf(stdout,NULL);
     TestTask((void *)TestTask);
     extern const Coroutine_Inter *GetInter(void);
     auto                          inter = GetInter();
