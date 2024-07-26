@@ -18,7 +18,6 @@
 
 #define EN_ATOMIC 0
 
-static CRITICAL_SECTION critical_section;
 static CRITICAL_SECTION memory_critical_section;
 static LONG volatile lock_critical_section = 0;
 struct
@@ -27,24 +26,34 @@ struct
     int64_t max_used;
 } memory;
 
-static void _Lock(const char *file, int line)
+static void *_CreateLock(void)
 {
-#if EN_ATOMIC
-    while (InterlockedIncrement(&lock_critical_section) != 1)
-        InterlockedDecrement(&lock_critical_section);
-#else
-    EnterCriticalSection(&critical_section);
-#endif
+    CRITICAL_SECTION *cs = new CRITICAL_SECTION();
+    InitializeCriticalSection(cs);
+    return cs;
+}
+
+static void _DestroyLock(void *cs)
+{
+    if (cs == nullptr)
+        return;
+    CRITICAL_SECTION *p = (CRITICAL_SECTION *)cs;
+    DeleteCriticalSection(p);
+    delete p;
     return;
 }
 
-static void _Unlock(const char *file, int line)
+static void _Lock(void *cs, const char *file, int line)
 {
-#if EN_ATOMIC
-    InterlockedDecrement(&lock_critical_section);
-#else
-    LeaveCriticalSection(&critical_section);
-#endif
+    CRITICAL_SECTION *p = (CRITICAL_SECTION *)cs;
+    EnterCriticalSection(p);
+    return;
+}
+
+static void _Unlock(void *cs, const char *file, int line)
+{
+    CRITICAL_SECTION *p = (CRITICAL_SECTION *)cs;
+    LeaveCriticalSection(p);
     return;
 }
 
@@ -54,9 +63,9 @@ static void _Free(void *ptr, const char *file, int line)
         return;
     size_t *p = (size_t *)ptr;
     p--;
-    EnterCriticalSection(&critical_section);
+    EnterCriticalSection(&memory_critical_section);
     memory.used -= (*p) + sizeof(size_t);
-    LeaveCriticalSection(&critical_section);
+    LeaveCriticalSection(&memory_critical_section);
     free(p);
     return;
 }
@@ -65,11 +74,11 @@ static void *_Malloc(size_t size, const char *file, int line)
 {
     size_t *ptr = (size_t *)malloc(size + sizeof(size_t));
     *ptr        = size;
-    EnterCriticalSection(&critical_section);
+    EnterCriticalSection(&memory_critical_section);
     memory.used += size + sizeof(size_t);
     if (memory.used > memory.max_used)
         memory.max_used = memory.used;
-    LeaveCriticalSection(&critical_section);
+    LeaveCriticalSection(&memory_critical_section);
     return ptr + 1;
 }
 
@@ -95,10 +104,10 @@ static void Coroutine_WatchdogTimeout(void *object, Coroutine_TaskId taskId, con
     }
 }
 
-#define MAX_THREADS 3
+#define MAX_THREADS 6
 
-static HANDLE sem_sleep[MAX_THREADS];
-static bool   is_sem_sleep[MAX_THREADS];
+static HANDLE sem_sleep;
+static int    num_sem_sleep = 0;
 
 static Coroutine_Events events = {
     nullptr,
@@ -107,23 +116,22 @@ static Coroutine_Events events = {
         return;
     },
     [](uint32_t time, void *object) -> void {
-        // Sleep(1); 模拟休眠
         int idx = Coroutine.GetCurrentCoroutineIdx();
-        EnterCriticalSection(&critical_section);
-        is_sem_sleep[idx] = 1;
-        LeaveCriticalSection(&critical_section);
-        WaitForSingleObject(sem_sleep[idx], time);
-        EnterCriticalSection(&critical_section);
-        is_sem_sleep[idx] = 0;
-        LeaveCriticalSection(&critical_section);
+        EnterCriticalSection(&memory_critical_section);
+        num_sem_sleep++;
+        LeaveCriticalSection(&memory_critical_section);
+        WaitForSingleObject(sem_sleep, time);
+        EnterCriticalSection(&memory_critical_section);
+        num_sem_sleep--;
+        LeaveCriticalSection(&memory_critical_section);
         return;
     },
-    [](uint16_t co_id, void *object) -> void {
-        EnterCriticalSection(&critical_section);
-        bool isWait = is_sem_sleep[co_id];
-        LeaveCriticalSection(&critical_section);
+    []( void *object) -> void {
+        EnterCriticalSection(&memory_critical_section);
+        bool isWait = num_sem_sleep > 0;
+        LeaveCriticalSection(&memory_critical_section);
         if (isWait)
-            ReleaseSemaphore(sem_sleep[co_id], 1, NULL);
+            ReleaseSemaphore(sem_sleep, 1, NULL);
         return;
     },
     [](void                      *object,
@@ -145,6 +153,10 @@ static Coroutine_Events events = {
 
 static const Coroutine_Inter Inter = {
     MAX_THREADS,
+#if COROUTINE_BLOCK_CRITICAL_SECTION
+    _CreateLock,
+    _DestroyLock,
+#endif
     _Lock,
     _Unlock,
     _Malloc,
@@ -156,21 +168,17 @@ static const Coroutine_Inter Inter = {
 
 const Coroutine_Inter *GetInter(void)
 {
-    InitializeCriticalSection(&critical_section);
     InitializeCriticalSection(&memory_critical_section);
-    for (int i = 0; i < MAX_THREADS; i++) {
-        sem_sleep[i] = CreateSemaphore(
-            NULL,    // 默认安全属性
-            0,       // 初始计数
-            1024,    // 最大计数
-            NULL);   // 未命名信号量
-        is_sem_sleep[i] = false;
-    }
+    sem_sleep = CreateSemaphore(
+        NULL,    // 默认安全属性
+        0,       // 初始计数
+        1024,    // 最大计数
+        NULL);   // 未命名信号量
     return &Inter;
 }
 
 void PrintMemory(void)
 {
-    printf("Memory used: %lld bytes, max used: %lld bytes\n", memory.used, memory.max_used);
+    printf("[%llu]Memory used: %lld bytes, max used: %lld bytes\n", GetMillisecond(), memory.used, memory.max_used);
     return;
 }

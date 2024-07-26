@@ -48,7 +48,6 @@ struct
     int32_t max_used;
 } memory;
 
-void *critical_section        = nullptr;
 void *memory_critical_section = nullptr;
 
 static void *__CreateLock(void)
@@ -59,29 +58,25 @@ static void *__CreateLock(void)
     return lock;
 }
 
-static void __Lock(void *obj)
+static void __DestroyLock(void *obj)
+{
+    Mutex_t *lock = (Mutex_t *)(obj);
+    pthread_mutex_destroy(&lock->obj);
+    delete lock;
+    return;
+}
+
+static void __Lock(void *obj, const char *file, int line)
 {
     Mutex_t *lock = (Mutex_t *)(obj);
     pthread_mutex_lock((pthread_mutex_t *)&(lock->obj));
     return;
 }
 
-static void __UnLock(void *obj)
+static void __UnLock(void *obj, const char *file, int line)
 {
     Mutex_t *lock = (Mutex_t *)(obj);
     pthread_mutex_unlock((pthread_mutex_t *)&(lock->obj));
-    return;
-}
-
-static void _Lock(const char *file, int line)
-{
-    __Lock(critical_section);
-    return;
-}
-
-static void _Unlock(const char *file, int line)
-{
-    __UnLock(critical_section);
     return;
 }
 
@@ -89,9 +84,9 @@ static void _Free(void *ptr, const char *file, int line)
 {
     size_t *p = (size_t *)ptr;
     p--;
-    __Lock(memory_critical_section);
+    __Lock(memory_critical_section, __FILE__, __LINE__);
     memory.used -= (*p) + sizeof(size_t);
-    __UnLock(memory_critical_section);
+    __UnLock(memory_critical_section, __FILE__, __LINE__);
     free(p);
     return;
 }
@@ -100,11 +95,11 @@ static void *_Malloc(size_t size, const char *file, int line)
 {
     size_t *ptr = (size_t *)malloc(size + sizeof(size_t));
     *ptr        = size;
-    __Lock(memory_critical_section);
+    __Lock(memory_critical_section, __FILE__, __LINE__);
     memory.used += size + sizeof(size_t);
     if (memory.used > memory.max_used)
         memory.max_used = memory.used;
-    __UnLock(memory_critical_section);
+    __UnLock(memory_critical_section, __FILE__, __LINE__);
     return ptr + 1;
 }
 
@@ -136,7 +131,7 @@ void Sleep(uint32_t time)
     return;
 }
 
-#define MAX_THREADS 4
+#define MAX_THREADS 6
 
 class IdleNode {
 public:
@@ -182,21 +177,20 @@ public:
     }
 };
 
-static IdleNode *idle_node[MAX_THREADS];
+static IdleNode *idle_node = nullptr;
 
 static Coroutine_Events events = {
     nullptr,
     [](void *object) -> void {
-        sched_yield();
+        // sched_yield();
         return;
     },
     [](uint32_t time, void *object) -> void {
-        int idx = Coroutine.GetCurrentCoroutineIdx();
-        idle_node[idx]->Idle(time);
+        idle_node->Idle(time);
         return;
     },
-    [](uint16_t co_id, void *object) -> void {
-        idle_node[co_id]->WeakUp();
+    [](void *object) -> void {
+        idle_node->WeakUp();
         return;
     },
     [](void                      *object,
@@ -219,8 +213,12 @@ static Coroutine_Events events = {
 
 static const Coroutine_Inter Inter = {
     MAX_THREADS,
-    _Lock,
-    _Unlock,
+#if COROUTINE_BLOCK_CRITICAL_SECTION
+    __CreateLock,
+    __DestroyLock,
+#endif
+    __Lock,
+    __UnLock,
     _Malloc,
     _Free,
     GetMillisecond,
@@ -230,11 +228,8 @@ static const Coroutine_Inter Inter = {
 
 const Coroutine_Inter *GetInter(void)
 {
-    critical_section        = __CreateLock();
     memory_critical_section = __CreateLock();
-    for (int i = 0; i < MAX_THREADS; i++) {
-        idle_node[i] = new IdleNode();
-    }
+    idle_node               = new IdleNode();
     return &Inter;
 }
 

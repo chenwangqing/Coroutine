@@ -101,7 +101,7 @@ typedef struct
     // PARS: name 任务名称
     // RETV：任务ID  0: 表示失败
     size_t (*RunTask)(void (*fun)(void *pars),
-                      void *      pars,
+                      void       *pars,
                       uint32_t    stacks,
                       uint8_t     pri,
                       const char *name);
