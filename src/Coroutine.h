@@ -301,18 +301,6 @@ typedef struct
     bool     isOk;   // 获取成功
 } Coroutine_MailResult;
 
-/**
- * @brief    任务属性
- * @author   CXS (chenxiangshu@outlook.com)
- * @date     2024-07-03
- */
-typedef struct
-{
-    int      co_idx;       // 绑定协程索引 小于SetInter设置的线程数量 -1: 随机分配 默认：-1
-    uint8_t  pri;          // 优先级  TASK_PRI_LOWEST ~ TASK_PRI_HIGHEST 默认：TASK_PRI_NORMAL
-    uint32_t stack_size;   // 栈大小 字节 0：使用默认 根据实际平台分配
-} Coroutine_TaskAttribute;
-
 typedef struct
 {
     /**
