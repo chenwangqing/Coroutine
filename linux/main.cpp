@@ -167,13 +167,6 @@ static void *RUNTask(void *obj)
     return nullptr;
 }
 
-static void TestTask(void *func)
-{
-    printf("a = %p", func);
-    return;
-}
-
-
 volatile uint64_t g_count = 0;
 
 static void Task7(void *obj)
@@ -252,10 +245,11 @@ static void Task_Channel4(void *obj)
     }
 }
 
+COROUTINE_INIT_REG_TASK("Task1", Task1, NULL, 16 << 10);
+
 int main()
 {
-    setbuf(stdout,NULL);
-    TestTask((void *)TestTask);
+    setbuf(stdout, NULL);
     extern const Coroutine_Inter *GetInter(void);
     auto                          inter = GetInter();
     Coroutine.SetInter(inter);
@@ -271,8 +265,6 @@ int main()
     int num        = 0;
     int stack_size = 1024 * 16;
 
-    Sleep(rand() % 1000);
-    Coroutine.AddTask(Task1, nullptr, TASK_PRI_NORMAL, stack_size, "Task1", nullptr);
     Sleep(rand() % 1000);
     Coroutine.AddTask(Task2, nullptr, TASK_PRI_NORMAL, stack_size, "Task2", nullptr);
     Sleep(rand() % 1000);

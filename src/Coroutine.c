@@ -292,6 +292,7 @@ static void DeleteMessage(Coroutine_MailData *dat);
 #endif
 static Coroutine_Handle       Coroutine_Create(size_t id);
 static CO_Thread *            GetCurrentThread(int co_idx);
+static void                   Coroutine_Register_Task_Run(void);
 volatile static func_setjmp_t _c_setjmp = setjmp;
 
 #define _ERROR_IDLE                                               \
@@ -402,7 +403,7 @@ static void WakeIdleThread()
 {
     if (C_Static.SleepNum < Inter.thread_count - C_Static.RunNum)
         return;   // 有空闲的线程
-#if 0
+#if 01
     bool isOk = false;
     if (C_Static.RunNum <= C_Static.wait_run_standalone_task_count) {
         // 其他任务都休眠了，检查是否有后续任务
@@ -2065,6 +2066,8 @@ static void SetInter(const Coroutine_Inter *inter)
     // 初始化完成，启动线程
     for (uint16_t i = 0; i < inter->thread_count; i++)
         C_Static.coroutines[i]->isRun = true;
+    // 添加初始任务
+    Coroutine_Register_Task_Run();
     return;
 }
 
@@ -2405,6 +2408,29 @@ static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
     return isOk;
 }
 #endif
+
+// --------------------------------------------------------------------------------------
+//                              |       初始化列表        |
+// --------------------------------------------------------------------------------------
+
+static Coroutine_Register_Task_t *Register_Task_Head = nullptr;
+
+void __Coroutine_Register_Task_Add(Coroutine_Register_Task_t *task)
+{
+    task->next         = Register_Task_Head;
+    Register_Task_Head = task;
+    return;
+}
+
+static void Coroutine_Register_Task_Run(void)
+{
+    Coroutine_Register_Task_t *task = Register_Task_Head;
+    while (task != nullptr) {
+        Coroutine.AddTask(task->func, task->pars, TASK_PRI_NORMAL, task->stack_size, task->name, nullptr);
+        task = task->next;
+    }
+    return;
+}
 
 // --------------------------------------------------------------------------------------
 //                              |       通用接口实现        |

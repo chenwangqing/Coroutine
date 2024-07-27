@@ -2,8 +2,8 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.20
- * @date     2024-07-10
+ * @version  1.21
+ * @date     2024-07-21
  *
  * @copyright Copyright (c) 2024  chenxiangshu@outlook.com
  *
@@ -50,6 +50,7 @@
  * <tr><td>2024-07-05 <td>1.18    <td>CXS    <td>删除共享栈，独立栈切换速度快更加实用;添加红黑树用于休眠列表
  * <tr><td>2024-07-08 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪；完善邮件通信
  * <tr><td>2024-07-10 <td>1.20    <td>CXS    <td>修正跨线程的协程调度错误；完善错误事件；添加通道
+ * <tr><td>2024-07-27 <td>1.21    <td>CXS    <td>添加COROUTINE_INIT_REG_TASK
  * </table>
  *
  * @note
@@ -660,6 +661,39 @@ typedef struct
  * @date     2022-08-16
  */
 extern const _Coroutine Coroutine;
+
+typedef struct Coroutine_Register_Task_t
+{
+    const char *                      name;
+    Coroutine_Task                    func;
+    void *                            pars;
+    size_t                            stack_size;
+    struct Coroutine_Register_Task_t *next;
+} Coroutine_Register_Task_t;
+
+extern void __Coroutine_Register_Task_Add(Coroutine_Register_Task_t *task);
+
+/**
+ * @brief    注册初始任务
+ * @param    Name           任务名称
+ * @param    Func           任务函数
+ * @param    Pars           任务参数
+ * @param    Stack_size     任务栈大小
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @date     2024-07-27
+ */
+#define COROUTINE_INIT_REG_TASK(Name, Func, Pars, Stack_size) \
+    CM_INIT_FUNCTION                                          \
+    {                                                         \
+        static Coroutine_Register_Task_t reg;                 \
+        memset(&reg, 0, sizeof(Coroutine_Register_Task_t));   \
+        reg.name       = Name;                                \
+        reg.func       = Func;                                \
+        reg.pars       = Pars;                                \
+        reg.stack_size = Stack_size;                          \
+        __Coroutine_Register_Task_Add(&reg);                    \
+    }
+
 #ifdef __cplusplus
 }
 #endif
