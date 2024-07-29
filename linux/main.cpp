@@ -40,7 +40,7 @@ void Task1(void *obj)
 #if 01
         char *buf = (char *)Coroutine.Malloc(str.size() + 1, __FILE__, __LINE__);
         memcpy(buf, str.c_str(), str.size() + 1);
-        if (!Coroutine.SendMail(mail1, i & 0xFF, (uint64_t)buf, str.size() + 1, 1000))
+        if (!Coroutine.SendMail(mail1, (i & 0xFF) | 0x01, (uint64_t)buf, str.size() + 1, 1000))
             Coroutine.Free(buf, __FILE__, __LINE__);
 #endif
         Sleep(10);
@@ -105,15 +105,17 @@ void Task4(void *obj)
         Coroutine.FeedDog(30 * 1000);
         int ms = (rand() % 250) + 250;
         Coroutine.YieldDelay(ms);
-        auto data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
-        if (data.data == 0 || data.isOk == false) continue;
-        printf("[%llu][4]mail1 recv: %llu %.*s\n",
-               Coroutine.GetMillisecond(),
-               data.id,
-               data.size,
-               (char *)data.data);
-        Coroutine.Free((void *)data.data, __FILE__, __LINE__);
-        Sleep(5);
+        while (true) {
+            auto data = Coroutine.ReceiveMail(mail1, 0xFF, 100);
+            if (data.data == 0 || data.isOk == false) break;
+            printf("[%llu][4]mail1 recv: %llu %.*s\n",
+                   Coroutine.GetMillisecond(),
+                   data.id,
+                   data.size,
+                   (char *)data.data);
+            Coroutine.Free((void *)data.data, __FILE__, __LINE__);
+            Sleep(5);
+        }
     }
     return;
 }
@@ -245,6 +247,22 @@ static void Task_Channel4(void *obj)
     }
 }
 
+
+static void *RUNTask_Test(void *obj)
+{
+    int         i   = 0;
+    std::string str = "hello";
+    while (true) {
+        Sleep(rand() % 1000);
+        str       = "hello - " + std::to_string(i);
+        char *buf = (char *)Coroutine.Malloc(str.size() + 1, __FILE__, __LINE__);
+        memcpy(buf, str.c_str(), str.size() + 1);
+        if (!Coroutine.SendMail(mail1, (i & 0xFF) | 0x01, (uint64_t)buf, str.size() + 1, 1000))
+            Coroutine.Free(buf, __FILE__, __LINE__);
+        i++;
+    }
+}
+
 COROUTINE_INIT_REG_TASK("Task1", Task1, NULL, 16 << 10);
 
 int main()
@@ -284,6 +302,8 @@ int main()
     Coroutine.AddTask(Task_Channel2, nullptr, TASK_PRI_NORMAL, stack_size, "Channel2", nullptr);
     Coroutine.AddTask(Task_Channel3, nullptr, TASK_PRI_NORMAL, stack_size, "Channel3", nullptr);
     Coroutine.AddTask(Task_Channel4, nullptr, TASK_PRI_NORMAL, stack_size, "Channel4", nullptr);
+
+    RunTask(RUNTask_Test, nullptr);
     while (true)
         Sleep(1000);
     return 0;

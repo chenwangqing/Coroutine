@@ -137,7 +137,7 @@ class IdleNode {
 public:
     pthread_cond_t  g_cond;
     pthread_mutex_t g_mutex;
-    volatile bool   isWait = false;
+    volatile int    isWait = 0;
 
     IdleNode()
     {
@@ -148,7 +148,6 @@ public:
 
     void Idle(uint32_t time)
     {
-        isWait = true;
         struct timeval  now;
         struct timespec outtime;
         gettimeofday(&now, NULL);
@@ -161,16 +160,17 @@ public:
         outtime.tv_sec  = now.tv_sec;
         outtime.tv_nsec = now.tv_usec * 1000;
         pthread_mutex_lock(&g_mutex);
+        isWait++;
         pthread_cond_timedwait(&g_cond, &g_mutex, &outtime);
+        isWait--;
         pthread_mutex_unlock(&g_mutex);
-        isWait = false;
         return;
     }
 
     void WeakUp()
     {
         pthread_mutex_lock(&g_mutex);
-        if (isWait)
+        if (isWait > 0)
             pthread_cond_signal(&g_cond);
         pthread_mutex_unlock(&g_mutex);
         return;
