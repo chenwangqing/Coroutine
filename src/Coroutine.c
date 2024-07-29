@@ -403,7 +403,7 @@ static void WakeIdleThread()
 {
     if (C_Static.SleepNum < Inter.thread_count - C_Static.RunNum)
         return;   // 有空闲的线程
-#if 01
+#if 0
     bool isOk = false;
     if (C_Static.RunNum <= C_Static.wait_run_standalone_task_count) {
         // 其他任务都休眠了，检查是否有后续任务
