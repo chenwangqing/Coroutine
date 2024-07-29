@@ -691,7 +691,7 @@ extern void __Coroutine_Register_Task_Add(Coroutine_Register_Task_t *task);
         reg.func       = Func;                                \
         reg.pars       = Pars;                                \
         reg.stack_size = Stack_size;                          \
-        __Coroutine_Register_Task_Add(&reg);                    \
+        __Coroutine_Register_Task_Add(&reg);                  \
     }
 
 #ifdef __cplusplus
