@@ -374,31 +374,6 @@ typedef uint8_t Bool;
 #define IOC_SAVE    "💾 "   // 保存
 #define IOC_WAIT    "⏳ "   // 等待
 
-// ----------------------------------------------------------------------------------------------------
-//                                          | 设备类型  |
-// ----------------------------------------------------------------------------------------------------
-
-#define OS_WINDOWS  0
-#define OS_LINUX    1
-#define OS_FREERTOS 2
-
-//#ifndef CFG_OS_MODE
-//#if (defined(_WIN32) || defined(_WIN64))
-//#define CFG_OS_MODE OS_WINDOWS
-//#elif __linux__
-//#define CFG_OS_MODE OS_LINUX
-//#else
-//#error "Please set the device type"
-//#endif
-//#endif
-
-#define OS_IS_LINUX    (CFG_OS_MODE == OS_LINUX)
-#define OS_IS_WINDOWS  (CFG_OS_MODE == OS_WINDOWS)
-#define OS_IS_FREERTOS (CFG_OS_MODE == OS_FREERTOS)
-
-#define CPU_IS_32BIT 4 == __SIZEOF_POINTER__
-#define CPU_IS_64BIT 8 == __SIZEOF_POINTER__
-
 #endif   // __CM_Define_H__
 
 /* 一些符号说明：
