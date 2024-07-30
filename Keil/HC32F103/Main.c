@@ -8,6 +8,7 @@
 #include "hc32f10x.h"
 #include "nplog.h"
 #include "Coroutine.h"
+#include "Print.h"
 
 extern void         PrintMemory(void);
 extern void         UART_LOG(const void *data, int lens);
@@ -33,10 +34,10 @@ static void Task1(void *arg)
         uint64_t ts = Task1_func1(ms);
         LOG_DEBUG("[1][%llu/%d]i = %d", ts, ms, i++);
         PrintMemory();
-        const int mlen = 1024 + 512;
+        const int   mlen = 1024 + 512;
         static char str[mlen];
-		int n = Coroutine.PrintInfo(str, mlen);
-		UART_LOG(str, n);
+        int         n = Coroutine.PrintInfo(str, mlen);
+        UART_LOG(str, n);
     }
     // return;
 }
@@ -89,8 +90,8 @@ void Task3(void *obj)
             LOG_DEBUG("[3]async result: %d/%d", b[0], b[1]);
             re = nullptr;
         }
-//        if (!re)
-//            re = Coroutine.Async(Task3_Func, a, 512);
+        //        if (!re)
+        //            re = Coroutine.Async(Task3_Func, a, 512);
     }
     //    return;
 }
@@ -194,18 +195,14 @@ int main(void)
     sem_uart = Coroutine.CreateSemaphore("sem_uart", 0);
     int num  = 0;
 
-    Coroutine_TaskAttribute atr;
-    memset(&atr, 0, sizeof(Coroutine_TaskAttribute));
-    atr.co_idx     = -1;
-    atr.stack_size = 1024;
-    atr.pri        = TASK_PRI_NORMAL;
+    const int stack_size = 1024;
     // 添加任务
-    Coroutine.AddTask(Task1, nullptr, "Task1", &atr);
-    Coroutine.AddTask(Task2, nullptr, "Task2", &atr);
-    Coroutine.AddTask(Task3, nullptr, "Task3", &atr);
-    Coroutine.AddTask(Task4, nullptr, "Task4", &atr);
-    Coroutine.AddTask(Task5, &num, "Task5-1", &atr);
-    Coroutine.AddTask(Task6, &num, "Task5-2", &atr);
+    Coroutine.AddTask(Task1, nullptr, TASK_PRI_NORMAL, stack_size, "Task1", nullptr);
+    Coroutine.AddTask(Task2, nullptr, TASK_PRI_NORMAL, stack_size, "Task2", nullptr);
+    Coroutine.AddTask(Task3, nullptr, TASK_PRI_NORMAL, stack_size, "Task3", nullptr);
+    Coroutine.AddTask(Task4, nullptr, TASK_PRI_NORMAL, stack_size, "Task4", nullptr);
+    Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-1", nullptr);
+    Coroutine.AddTask(Task6, &num, TASK_PRI_NORMAL, stack_size, "Task5-2", nullptr);
 
     while (true)
         Coroutine.RunTick();

@@ -2042,9 +2042,9 @@ static void SetInter(const Coroutine_Inter *inter)
 {
     Inter = *inter;
     if (inter->thread_count > 65535) Inter.thread_count = 65535;
-    // 创建临界保护
-    C_Static.cs = Inter.CreateCriticalSection();
+        // 创建临界保护
 #if COROUTINE_BLOCK_CRITICAL_SECTION
+    C_Static.cs            = Inter.CreateCriticalSection();
     C_Static.cs_mailboxes  = Inter.CreateCriticalSection();
     C_Static.cs_mutexes    = Inter.CreateCriticalSection();
     C_Static.cs_semaphores = Inter.CreateCriticalSection();

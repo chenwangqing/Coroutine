@@ -47,13 +47,13 @@ static size_t GetThreadId(void)
     return 0;
 }
 
-static void _Lock(const char *file, int line)
+static void _Lock(void *cs, const char *file, int line)
 {
     CriticalSection(true);
     return;
 }
 
-static void _Unlock(const char *file, int line)
+static void _Unlock(void *cs, const char *file, int line)
 {
     CriticalSection(false);
     return;
