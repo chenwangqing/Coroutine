@@ -292,6 +292,7 @@ static void DeleteMessage(Coroutine_MailData *dat);
 #endif
 static Coroutine_Handle       Coroutine_Create(size_t id);
 static CO_Thread *            GetCurrentThread(int co_idx);
+static void                   Coroutine_Register_Task_Run(void);
 volatile static func_setjmp_t _c_setjmp = setjmp;
 
 #define _ERROR_IDLE                                               \
@@ -402,7 +403,7 @@ static void WakeIdleThread()
 {
     if (C_Static.SleepNum < Inter.thread_count - C_Static.RunNum)
         return;   // 有空闲的线程
-#if 1
+#if 0
     bool isOk = false;
     if (C_Static.RunNum <= C_Static.wait_run_standalone_task_count) {
         // 其他任务都休眠了，检查是否有后续任务
@@ -547,7 +548,9 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
 {
     if (coroutine->isRun == 0)
         return nullptr;
-    CO_TCB *task = nullptr;
+    CO_TCB *task;
+START:
+    task = nullptr;
     for (int i = 0; i < MAX_PRIORITY_NUM && task == nullptr; i++)
         task = GetNextTask_StandaloneTask(coroutine, i);
     if (task == nullptr)
@@ -555,7 +558,7 @@ static CO_TCB *GetNextTask(CO_Thread *coroutine)
     // 检查任务是否需要删除
     if (task->isDel) {
         DeleteTask(task);
-        return nullptr;
+        goto START;
     }
     task->coroutine     = coroutine;
     task->isRuning      = 1;   // 设置运行标志
@@ -673,7 +676,6 @@ static void _Task(CO_Thread *coroutine)
         coroutine->sleep_time += now - coroutine->task_start_time;
         coroutine->task_start_time = now;
 #endif
-        CheckSuccessorTask();
     } else if (isSleep)
         C_Static.SleepNum++;
     CO_LeaveCriticalSection();
@@ -687,6 +689,10 @@ static void _Task(CO_Thread *coroutine)
         }
         return;
     }
+    // 检查后续任务
+    CO_EnterCriticalSection();
+    CheckSuccessorTask();
+    CO_LeaveCriticalSection();
     // 执行任务
     _enter_into(n);
     // 记录运行时间
@@ -696,7 +702,7 @@ static void _Task(CO_Thread *coroutine)
     if (tv) n->run_time += tv;
 #endif
     // 线程空闲
-    coroutine->idx_task = nullptr;
+    coroutine->idx_task        = nullptr;
     coroutine->task_start_time = now;
     // 添加到运行列表
     CO_EnterCriticalSection();
@@ -1874,7 +1880,7 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
             if (owner->priority > task->priority) {
                 // 优先级提升
                 if (owner->isAddRunList)
-                    AddTaskList(owner, task->priority, nullptr);
+                    AddTaskList(owner, task->priority, c);
                 else
                     owner->priority = task->priority;
             }
@@ -2060,6 +2066,8 @@ static void SetInter(const Coroutine_Inter *inter)
     // 初始化完成，启动线程
     for (uint16_t i = 0; i < inter->thread_count; i++)
         C_Static.coroutines[i]->isRun = true;
+    // 添加初始任务
+    Coroutine_Register_Task_Run();
     return;
 }
 
@@ -2400,6 +2408,29 @@ static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
     return isOk;
 }
 #endif
+
+// --------------------------------------------------------------------------------------
+//                              |       初始化列表        |
+// --------------------------------------------------------------------------------------
+
+static Coroutine_Register_Task_t *Register_Task_Head = nullptr;
+
+void __Coroutine_Register_Task_Add(Coroutine_Register_Task_t *task)
+{
+    task->next         = Register_Task_Head;
+    Register_Task_Head = task;
+    return;
+}
+
+static void Coroutine_Register_Task_Run(void)
+{
+    Coroutine_Register_Task_t *task = Register_Task_Head;
+    while (task != nullptr) {
+        Coroutine.AddTask(task->func, task->pars, TASK_PRI_NORMAL, task->stack_size, task->name, nullptr);
+        task = task->next;
+    }
+    return;
+}
 
 // --------------------------------------------------------------------------------------
 //                              |       通用接口实现        |
