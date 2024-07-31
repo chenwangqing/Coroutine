@@ -900,10 +900,8 @@ static bool Coroutine_RunTick(uint32_t timeout)
     CO_Thread *coroutine = GetCurrentThread(-1, true);
     if (coroutine == NULL)
         return false;
-    while (true) {
-        _Task(coroutine, timeout);
-    }
-    return true;
+    _Task(coroutine, timeout);
+    return !CM_NodeLink_IsEmpty(C_Static.task_list);
 }
 
 static void Coroutine_MillisecondInterrupt(void)
