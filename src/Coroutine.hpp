@@ -2,8 +2,8 @@
  * @file     Coroutine.hpp
  * @brief    协程C++接口
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.0
- * @date     2024-07-11
+ * @version  1.1
+ * @date     2024-07-31
  *
  * @copyright Copyright (c) 2024  Four-Faith
  *
@@ -11,6 +11,7 @@
  * <table>
  * <tr><th>日期       <th>版本    <th>作者    <th>说明
  * <tr><td>2024-07-11 <td>1.0     <td>CXS     <td>创建
+ * <tr><td>2024-07-31 <td>1.1     <td>CXS     <td>添加宏 GO
  * </table>
  */
 
@@ -18,12 +19,18 @@
 #define __COROUTINE_HPP__
 #include "Coroutine.h"
 #include <functional>
+#include <tuple>
+#include <type_traits>
+
 namespace CO {
 
     template<typename R, class... Args>
     class _Function {
     private:
-        using _Tuple = std::tuple<std::decay_t<Args>...>;
+        template<typename _Tp>
+        using decay_t = typename std::decay<_Tp>::type;
+
+        using _Tuple = std::tuple<decay_t<Args>...>;
         _Tuple pars;
         R(*fn)
         (Args...);
@@ -212,12 +219,76 @@ namespace CO {
         }
     };
 
+    class _GO {
+    private:
+        std::function<void()> fn;
+        char                  name[32];
+
+        static void TaskFunc(void *object)
+        {
+            _GO *go = static_cast<_GO *>(object);
+            go->fn();
+            delete go;
+            return;
+        }
+
+        _GO(const std::function<void()> &fn)
+        {
+            this->fn = fn;
+        }
+
+        _GO(std::function<void()> &&fn)
+        {
+            this->fn = std::move(fn);
+        }
+
+    public:
+        _GO(const char *file, int line)
+        {
+            auto fs = file;
+            while (*file) {
+                if (*file == '/' || *file == '\\')
+                    fs = file + 1;
+                file++;
+            }
+            std::string s = fs;
+            s             = s.substr(0, s.find_last_of('.'));
+            s += ":" + std::to_string(line);
+            auto offset = s.length() > 31 ? s.length() - 31 : 0;
+            memcpy(name, s.c_str() + offset, 31);
+            name[31] = '\0';
+            return;
+        }
+
+        template<typename Function>
+        inline void operator-(Function const &f)
+        {
+            _GO *go = new _GO(f);
+            if (Coroutine.AddTask(TaskFunc, go, TASK_PRI_NORMAL, 0, this->name, nullptr) == nullptr) {
+                delete go;
+            }
+            return;
+        }
+    };
+
+    // clang-format off
+/**
+ * @brief    执行协程
+ * @author   CXS (chenxiangshu@outlook.com)
+ * @note     GO[stack_size]()
+            {
+                printf("stack_size: %d\n", stack_size);
+            };
+ * @date     2024-07-31
+ */
+#define GO CO::_GO(__FILE__, __LINE__)-
+    // clang-format on
+
     /**
      * @brief    异步任务类
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-07-11
      */
-
     template<typename R>
     class Async {
     private:

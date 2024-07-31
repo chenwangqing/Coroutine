@@ -2,8 +2,8 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.21
- * @date     2024-07-21
+ * @version  1.22
+ * @date     2024-07-31
  *
  * @copyright Copyright (c) 2024  chenxiangshu@outlook.com
  *
@@ -51,6 +51,7 @@
  * <tr><td>2024-07-08 <td>1.19    <td>CXS    <td>添加 COROUTINE_ENABLE_XXX 宏控制功能开关，方便功能裁剪；完善邮件通信
  * <tr><td>2024-07-10 <td>1.20    <td>CXS    <td>修正跨线程的协程调度错误；完善错误事件；添加通道
  * <tr><td>2024-07-27 <td>1.21    <td>CXS    <td>添加COROUTINE_INIT_REG_TASK
+ * <tr><td>2024-07-31 <td>1.22    <td>CXS    <td>修正Channel功能错误；添加MillisecondInterrupt优化任务调度
  * </table>
  *
  * @note
@@ -374,11 +375,20 @@ typedef struct
     /**
      * @brief    【外部使用】运行协程(一次运行一个任务)
      * @param    c              协程实例
+     * @param    timeout        等待任务超时 0：不超时
      * @return   true           后续还有任务在运行
+     * @return   false          任务列表为空，没有任务
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-08-17
      */
-    bool (*RunTick)(void);
+    bool (*RunTick)(uint32_t timeout);
+
+    /**
+     * @brief    毫秒中断
+     * @author   CXS (chenxiangshu@outlook.com)
+     * @date     2024-07-31
+     */
+    void (*MillisecondInterrupt)(void);
 
 #if COROUTINE_ENABLE_MAILBOX
     /**
@@ -436,7 +446,7 @@ typedef struct
      *  SN   TaskId   Func    Pri                 Status Stack                Runtime       WaitTime   DogTime    Name
      * 序号  任务id   函数地址 当前优先级|初始优先级 状态 栈大小/栈最大/栈分配 运行时间(ms) 等待时间(ms) 看门狗时间(ms) 名称
      *   1 00C91124 007D115E  2|2                 MW   1128/1128/16384      14(51%)       58         29958      Task3
-     * Status：RUN: 正在运行 SLR: 休眠/就绪 MAI: 等待邮件 SEM: 等待信号 MUT: 等待互斥 CHL: 等待通道 DEL: 死亡
+     * Status：RUN: 正在运行 SLR: 休眠/就绪 MAI: 等待邮件 SEM: 等待信号 MUT: 等待互斥 CHR: 等待读通道 CHW:等待写通道 DEL: 死亡
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2022-08-16
      */

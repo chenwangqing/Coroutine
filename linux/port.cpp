@@ -186,7 +186,10 @@ static Coroutine_Events events = {
         return;
     },
     [](uint32_t time, void *object) -> void {
-        idle_node->Idle(time);
+        if (time == 0)
+            sched_yield();
+        else
+            idle_node->Idle(time);
         return;
     },
     [](void *object) -> void {
@@ -225,6 +228,7 @@ static const Coroutine_Inter Inter = {
     GetThreadId,
     &events,
 };
+
 
 const Coroutine_Inter *GetInter(void)
 {
