@@ -24,7 +24,7 @@
 typedef struct _NPLOG_Info
 {
     int                 level;   // 日志等级
-    const char         *name;    // 名称
+    const char *        name;    // 名称
     struct _NPLOG_Info *next;
 } NPLOG_Info;
 
@@ -36,7 +36,7 @@ typedef struct _NPLOG_Info
 typedef struct
 {
     int (*Print)(const NPLOG_Info *info, int level, const char *file, int line, const char *, ...);
-    void (*PrintArray)(const NPLOG_Info *info, int level, const char *file, int line, const void *data, int lens);
+    int (*PrintArray)(const NPLOG_Info *info, int level, const char *file, int line, const void *data, int lens);
 } NPLOG_Inter;
 
 /**
@@ -47,7 +47,7 @@ typedef struct
 typedef struct
 {
     int (*Print)(const NPLOG_Info *info, int level, const char *file, int line, const char *, ...);
-    void (*PrintArray)(const NPLOG_Info *info, int level, const char *file, int line, const void *data, int lens);
+    int (*PrintArray)(const NPLOG_Info *info, int level, const char *file, int line, const void *data, int lens);
     NPLOG_Info *infos;   // 日志信息列表
 } NPLOG;
 
@@ -64,15 +64,8 @@ typedef struct
     static NPLOG_Info *CM_S_S(_##TAG, _nplog_info) = nullptr;  \
     CM_INIT_FUNCTION                                           \
     {                                                          \
-        NPLOG_Info *p = NPLOG_GetInter()->infos;               \
-        while (p != nullptr && (size_t)p->name != (size_t)TAG) \
-            p = p->next;                                       \
-        if (p != nullptr) {                                    \
-            CM_S_S(_##TAG, _nplog_info) = p;                   \
-            return;                                            \
-        }                                                      \
         static NPLOG_Info info;                                \
-        info.name                   = TAG;                     \
+        info.name                   = #TAG;                    \
         info.level                  = Level;                   \
         info.next                   = NPLOG_GetInter()->infos; \
         NPLOG_GetInter()->infos     = &info;                   \
@@ -179,4 +172,17 @@ NPLOG *NPLOG_GetInter(void);
 /*
     1. 导入日志模块
     NPLOG_IMPORT(Print,PrintArray);
+
+    2. 使用
+    NPLOG_DEFINE(main, NPLOG_LEVEL_DEBUG);
+    #undef LOG_PRINTF_Array
+    #undef LOG_DEBUG
+    #undef LOG_PRINTF
+    #undef LOG_WARNING
+    #undef LOG_ERROR
+    #define LOG_PRINTF_Array(level, data, len) LOG_TAG_Array(main, level, data, len)
+    #define LOG_DEBUG(format, ...)             LOG_TAG_DBUG(main, format, ##__VA_ARGS__)
+    #define LOG_PRINTF(format, ...)            LOG_TAG_INFO(main, format, ##__VA_ARGS__)
+    #define LOG_WARNING(format, ...)           LOG_TAG_WARN(main, format, ##__VA_ARGS__)
+    #define LOG_ERROR(format, ...)             LOG_TAG_FAIL(main, format, ##__VA_ARGS__)
 */

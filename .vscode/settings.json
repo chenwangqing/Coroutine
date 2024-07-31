@@ -53,6 +53,19 @@
         "setjmp.h": "c",
         "*.platform": "c",
         "coroutine.h": "c",
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "array": "c",
+        "string_view": "c",
+        "thread": "cpp",
+        "c++config": "cpp",
+        "*.tcc": "cpp",
+        "chrono": "cpp",
+        "cwctype": "cpp",
+        "unordered_map": "cpp",
+        "fstream": "cpp",
+        "functional": "cpp",
+        "optional": "cpp",
+        "ratio": "cpp",
+        "sstream": "cpp"
     },
 }

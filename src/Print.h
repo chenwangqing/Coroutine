@@ -36,7 +36,7 @@
 extern "C" {
 #endif
 
-#ifdef __arm__   // arm32 不需要支持长浮点，以减少ROM
+#if !defined(__linux__) && defined(__arm__)   // arm32 不需要支持长浮点，以减少ROM
 #undef CFG_PRINT_LONG_FLOAT_SUPPORT
 #define CFG_PRINT_LONG_FLOAT_SUPPORT 0
 typedef int ssize_t;

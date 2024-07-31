@@ -131,7 +131,7 @@ void Sleep(uint32_t time)
     return;
 }
 
-#define MAX_THREADS 6
+#define MAX_THREADS 8
 
 class IdleNode {
 public:
@@ -255,5 +255,6 @@ void RunTask(void *(*func)(void *arg), void *arg)
 void PrintMemory(void)
 {
     printf("Memory used: %d bytes, max used: %d bytes\n", memory.used, memory.max_used);
+
     return;
 }

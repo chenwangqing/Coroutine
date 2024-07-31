@@ -53,10 +53,12 @@ set(EXTRA_LIBS ${EXTRA_LIBS} librt.so)
 set(CODE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/port.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/nplog.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/Coroutine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/NodeLink.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/RBTree.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/Print.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/Print.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/Coroutine_Hook_Linux.c)
 
 
 # ------------------------------------- 编译 --------------------------------------
