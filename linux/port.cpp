@@ -131,7 +131,7 @@ void Sleep(uint32_t time)
     return;
 }
 
-#define MAX_THREADS 8
+#define MAX_THREADS 6
 
 class IdleNode {
 public:

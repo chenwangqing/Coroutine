@@ -1,8 +1,8 @@
 
 #include "Coroutine.h"
-#include "Coroutine.Platform.h"
 #include "RBTree.h"
 #include "NodeLink.h"
+#include "Coroutine.Platform.h"
 
 typedef int STACK_TYPE;   // 栈类型
 
@@ -11,8 +11,6 @@ typedef int STACK_TYPE;   // 栈类型
 
 #define MAX_PRIORITY_NUM 5   // 最大优先级数
 #define DELAY_CHECK      0   // 延时检查间隔 ms
-
-typedef int (*func_setjmp_t)(jmp_buf buf);
 
 // --------------------------------------------------------------------------------------
 //                              |       应用        |
@@ -293,11 +291,10 @@ static struct
 #if COROUTINE_ENABLE_SEMAPHORE
 static void DeleteMessage(Coroutine_MailData *dat);
 #endif
-static Coroutine_Handle       Coroutine_Create(size_t);
-static CO_Thread *            GetCurrentThread(int, bool);
-static void                   Coroutine_Register_Task_Run(void);
-static void                   AddTaskList(CO_TCB *task, uint8_t new_pri);
-volatile static func_setjmp_t _c_setjmp = setjmp;
+static Coroutine_Handle Coroutine_Create(size_t);
+static CO_Thread *      GetCurrentThread(int, bool);
+static void             Coroutine_Register_Task_Run(void);
+static void             AddTaskList(CO_TCB *task, uint8_t new_pri);
 
 #define _ERROR_IDLE                                               \
     while (true) {                                                \
@@ -405,7 +402,7 @@ static void CheckStack(volatile CO_TCB *t)
  */
 static bool CheckAndWakeIdleThread(void)
 {
-    if (C_Static.wait_run_standalone_task_count == 0)
+    if (C_Static.wait_run_standalone_task_count == 0 || Inter.thread_count == 1)
         return false;   // 没有后续任务
     if (C_Static.WakeNum)
         return false;   // 已经有线程唤醒了
@@ -630,31 +627,42 @@ static void __task(CO_TCB *n)
     n->priority = 0;
     n->isDel    = true;
     // 回到调度器
+#if COROUTINE_CONTEXT_MODE == CONTEXT_JMP
     longjmp(n->coroutine->env, 1);
+#elif COROUTINE_CONTEXT_MODE == CONTEXT_UCONTEXT
+    swapcontext(&n->env, &n->coroutine->env);
+#endif
 }
 
-static void _enter_into(volatile CO_TCB *n)
+static STACK_TYPE *__GetStack(CO_TCB *n)
 {
+    // 栈对齐
+    STACK_TYPE *stack = NULL;
+    if (coroutine_get_stack_direction()) {
+        // 栈向上增长
+        stack = (STACK_TYPE *)(n->stack + 1);
+        while ((size_t)stack % sizeof(void *))
+            stack++;
+    } else {
+        // 栈向下增长
+        stack = (STACK_TYPE *)(n->stack + n->stack_alloc - 1);
+        while ((size_t)stack % sizeof(void *))
+            stack--;
+    }
+    return stack;
+}
+
+static void _enter_into(CO_TCB *n)
+{
+#if COROUTINE_CONTEXT_MODE == CONTEXT_JMP
     // 保存环境
-    int ret = _c_setjmp(n->coroutine->env);
+    int ret = setjmp(n->coroutine->env);
     if (ret == 0) {
         if (n->isFirst) {
             // 设置已运行标志
             n->isFirst = false;
             // 第一次运行
-            // 栈对齐
-            STACK_TYPE *stack = NULL;
-            if (coroutine_get_stack_direction()) {
-                // 栈向上增长
-                stack = (STACK_TYPE *)(n->stack + 1);
-                while ((size_t)stack % sizeof(void *))
-                    stack++;
-            } else {
-                // 栈向下增长
-                stack = (STACK_TYPE *)(n->stack + n->stack_alloc - 1);
-                while ((size_t)stack % sizeof(void *))
-                    stack--;
-            }
+            STACK_TYPE *stack = __GetStack(n);
             // 使用新的栈进入函数
             coroutine_enter_task(__task, (void *)n, stack);
             //! 不会执行到这里
@@ -664,6 +672,21 @@ static void _enter_into(volatile CO_TCB *n)
             longjmp(((CO_TCB *)n)->env, 1);
         }
     }
+#elif COROUTINE_CONTEXT_MODE == CONTEXT_UCONTEXT
+    if (n->isFirst) {
+        // 设置已运行标志
+        n->isFirst = false;
+        // 获取栈信息
+        STACK_TYPE *stack = __GetStack(n);
+        // 创建上下文
+        getcontext(&n->env);
+        n->env.uc_stack.ss_sp   = n->stack;
+        n->env.uc_stack.ss_size = (stack - n->stack) * sizeof(STACK_TYPE);
+        makecontext(&n->env, (void (*)(void))__task, 1, (void *)n);
+    }
+    // 切换到任务
+    swapcontext(&n->coroutine->env, &n->env);
+#endif
     return;
 }
 
@@ -716,13 +739,13 @@ static void _Task(CO_Thread *coroutine, uint32_t timeout)
         }
         return;
     }
-    // 记录运行时间
-    n->run_start_time = now;
     // 检查后续任务
     CheckAndWakeIdleThread();
 #if COROUTINE_ENABLE_PRINT_INFO
     // 记录切换次数
     coroutine->schedule_count++;
+    // 记录运行时间
+    n->run_start_time = now;
 #endif
     // 执行任务
     _enter_into(n);
@@ -730,7 +753,9 @@ static void _Task(CO_Thread *coroutine, uint32_t timeout)
     now                        = Inter.GetMillisecond();
     coroutine->task_start_time = now;
     coroutine->idx_task        = NULL;
+#if COROUTINE_ENABLE_PRINT_INFO
     n->run_time += now - n->run_start_time;
+#endif
     // 添加到运行列表
     CO_EnterCriticalSection();
     C_Static.RunNum--;
@@ -748,31 +773,43 @@ static void _Task(CO_Thread *coroutine, uint32_t timeout)
     return;
 }
 
+static void _Switch_CheckStack(CO_TCB *n)
+{
+    volatile STACK_TYPE __mem   = 0x11223344;                             // 利用局部变量获取堆栈寄存器值
+    STACK_TYPE *        p_stack = (STACK_TYPE *)(((size_t)&__mem) - 4);   // 获取栈结尾
+    // 检查栈溢出
+    if (p_stack <= n->stack) {
+        // 栈溢出
+        ERROR_STACK(n, (n->stack - p_stack) * sizeof(STACK_TYPE));
+    }
+    // 计算栈大小
+    n->stack_len = n->stack_alloc - (p_stack - n->stack);
+    // 记录最大栈大小
+    if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
+#if COROUTINE_CHECK_STACK
+    CheckStack(n);
+#else
+    // 检查栈哨兵
+    CHECK_STACK_SENTRY(n);
+#endif
+    return;
+}
+
 static void _Switch(CO_TCB *n, jmp_buf *dst_env)
 {
-    // 保存环境,回到调度器
-    int ret = _c_setjmp(((CO_TCB *)n)->env);
+    // 检查栈
+    _Switch_CheckStack(n);
+#if COROUTINE_CONTEXT_MODE == CONTEXT_JMP
+    // 保存环境,回到目标环境
+    int ret = setjmp(((CO_TCB *)n)->env);
     if (ret == 0) {
-        volatile STACK_TYPE __mem   = 0x11223344;                             // 利用局部变量获取堆栈寄存器值
-        STACK_TYPE *        p_stack = (STACK_TYPE *)(((size_t)&__mem) - 4);   // 获取栈结尾
-        // 检查栈溢出
-        if (p_stack <= n->stack) {
-            // 栈溢出
-            ERROR_STACK(n, (n->stack - p_stack) * sizeof(STACK_TYPE));
-        }
-        // 计算栈大小
-        n->stack_len = n->stack_alloc - (p_stack - n->stack);
-        // 记录最大栈大小
-        if (n->stack_len > n->stack_max) n->stack_max = n->stack_len;
-#if COROUTINE_CHECK_STACK
-        CheckStack(n);
-#else
-        // 检查栈哨兵
-        CHECK_STACK_SENTRY(n);
-#endif
         // 跳转目标环境
         longjmp(*dst_env, 1);
     }
+#elif COROUTINE_CONTEXT_MODE == CONTEXT_UCONTEXT
+    // 跳转目标环境
+    swapcontext(&n->env, dst_env);
+#endif
     return;
 }
 
@@ -873,14 +910,18 @@ static void _Yield(CO_TCB *related)
  */
 static CO_Thread *GetCurrentThread(int co_idx, bool isAlloc)
 {
+    size_t     id  = Inter.GetThreadId();
     CO_Thread *ret = NULL;
     if (Inter.thread_count == 1) {
+        if (isAlloc && C_Static.ThreadAllocNum == 0) {
+            C_Static.coroutines[0]->ThreadId = id;
+            C_Static.ThreadAllocNum          = 1;
+        }
         ret = C_Static.coroutines[0];
-        if (ret->ThreadId == (size_t)-1)
-            ret->ThreadId = Inter.GetThreadId();
+        if (ret->ThreadId != id)
+            ret = NULL;
     } else {
         if (co_idx < 0) {
-            size_t id = Inter.GetThreadId();
             if (C_Static.ThreadAllocNum == Inter.thread_count) {
                 int s = 0, idx = 0, e = Inter.thread_count - 1;
                 while (s <= e) {
@@ -944,6 +985,8 @@ static bool Coroutine_RunTick(uint32_t timeout)
 
 static void Coroutine_MillisecondInterrupt(void)
 {
+    if (C_Static.ThreadAllocNum != Inter.thread_count)
+        return;
     uint64_t now = Inter.GetMillisecond();
     CO_EnterCriticalSection();
     CheckWatchdog(now);                     // 检查看门狗

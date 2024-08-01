@@ -15,16 +15,35 @@
  */
 #include <stdint.h>
 #include "Coroutine.h"
+
+// --------------------------------------------------------------------------------------
+//                              |   配置上下文切换方式    |
+// --------------------------------------------------------------------------------------
+
+#define CONTEXT_JMP      1   // setjmp / longjmp
+#define CONTEXT_UCONTEXT 2   // getcontext / setcontext
+
+// 上下文切换模式
+#if defined(__linux__)
+#define COROUTINE_CONTEXT_MODE CONTEXT_UCONTEXT
+#else
+#define COROUTINE_CONTEXT_MODE CONTEXT_JMP
+#endif
+
+// --------------------------------------------------------------------------------------
+//                              |   跳转处理    |
+// --------------------------------------------------------------------------------------
+
+#if COROUTINE_CONTEXT_MODE == CONTEXT_UCONTEXT
+#include <ucontext.h>
+typedef ucontext_t jmp_buf;
+#else
 #ifdef WIN32
 typedef uint32_t jmp_buf[6];
 #else
 #include <setjmp.h>
 #endif
-
-
-// --------------------------------------------------------------------------------------
-//                              |   跳转处理    |
-// --------------------------------------------------------------------------------------
+#endif
 
 #ifdef WIN32
 // VC 编译器 longjmp 会析构C++ 对象，使用需要自己实现 setjmp / longjmp
@@ -113,6 +132,7 @@ static inline bool coroutine_get_stack_direction(void)
 //                              |   函数建立    |
 // --------------------------------------------------------------------------------------
 
+#if COROUTINE_CONTEXT_MODE == CONTEXT_JMP
 // clang-format off
 #if defined(__riscv) && __riscv_xlen == 32 // RISC-V 32
 static inline  void coroutine_enter_task(void *func, void *arg, int *stack)
@@ -187,5 +207,6 @@ static inline void coroutine_enter_task(void *func, void *arg, int *stack)
 #else
 // TODO: 其他平台的实现
 #error "Coroutine.Platform: Unsupported platform!"
+#endif
 #endif
 // clang-format on

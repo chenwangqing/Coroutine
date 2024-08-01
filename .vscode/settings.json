@@ -66,6 +66,8 @@
         "functional": "cpp",
         "optional": "cpp",
         "ratio": "cpp",
-        "sstream": "cpp"
+        "sstream": "cpp",
+        "ucontext.h": "c",
+        "coroutine.platform.h": "c"
     },
 }

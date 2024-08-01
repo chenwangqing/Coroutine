@@ -2,8 +2,8 @@
  * @file     Coroutine.h
  * @brief    通用协程
  * @author   CXS (chenxiangshu@outlook.com)
- * @version  1.22
- * @date     2024-07-31
+ * @version  1.23
+ * @date     2024-08-01
  *
  * @copyright Copyright (c) 2024  chenxiangshu@outlook.com
  *
@@ -52,6 +52,7 @@
  * <tr><td>2024-07-10 <td>1.20    <td>CXS    <td>修正跨线程的协程调度错误；完善错误事件；添加通道
  * <tr><td>2024-07-27 <td>1.21    <td>CXS    <td>添加COROUTINE_INIT_REG_TASK
  * <tr><td>2024-07-31 <td>1.22    <td>CXS    <td>修正Channel功能错误；添加MillisecondInterrupt优化任务调度
+ * <tr><td>2024-08-01 <td>1.23    <td>CXS    <td>添加ucontext上下文切换，方便linux移植
  * </table>
  *
  * @note
@@ -115,13 +116,13 @@ extern "C" {
 #ifndef COROUTINE_ENABLE_WATCHDOG
 #define COROUTINE_ENABLE_WATCHDOG 1
 #endif
-// 启用打印信息
-#ifndef COROUTINE_ENABLE_PRINT_INFO
-#define COROUTINE_ENABLE_PRINT_INFO 1
-#endif
 // 启用管道
 #ifndef COROUTINE_ENABLE_CHANNEL
 #define COROUTINE_ENABLE_CHANNEL 1
+#endif
+// 启用打印信息
+#ifndef COROUTINE_ENABLE_PRINT_INFO
+#define COROUTINE_ENABLE_PRINT_INFO 1
 #endif
 
 // -------------- 独立栈协程 --------------

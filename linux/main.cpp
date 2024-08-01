@@ -61,8 +61,10 @@ void Task1(void *obj)
             Coroutine.Free(buf, __FILE__, __LINE__);
 #endif
         Sleep(10);
+#if COROUTINE_ENABLE_PRINT_INFO
         Coroutine.PrintInfo(str_buf, 4 * 1024);
         puts(str_buf);
+#endif
     }
     return;
 }
@@ -175,6 +177,16 @@ static void Task7(void *obj)
     return;
 }
 
+static void Task71(void *obj)
+{
+    int *num = (int *)obj;
+    while (true) {
+        (*num)++;
+        Coroutine.Yield();
+    }
+    return;
+}
+
 void *RUNTask_TestCount(void *obj)
 {
     while (true) {
@@ -279,6 +291,7 @@ static void *RUNTask_Init(void *obj)
 
 
     static int num        = 0;
+    static int num71      = 0;
     int        stack_size = 1024 * 32;
 
     GO[stack_size]()
@@ -298,6 +311,7 @@ static void *RUNTask_Init(void *obj)
     Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-2", nullptr);
 
     Coroutine.AddTask(Task7, nullptr, TASK_PRI_NORMAL, stack_size, "Task7", nullptr);
+    // Coroutine.AddTask(Task71, &num71, TASK_PRI_NORMAL, stack_size, "Task71", nullptr);
 
     Coroutine.AddTask(Task_Channel1, nullptr, TASK_PRI_NORMAL, stack_size, "Channel1", nullptr);
     Coroutine.AddTask(Task_Channel2, nullptr, TASK_PRI_NORMAL, stack_size, "Channel2", nullptr);
@@ -319,7 +333,7 @@ int main()
 
     RunTask(RUNTask_Init, nullptr);   // 初始化任务
 
-    RunTask(RUNTask_Test, nullptr);
+    // RunTask(RUNTask_Test, nullptr);
     // RunTask(RUNTask_TestCount, nullptr);
 
     struct timespec tv;
