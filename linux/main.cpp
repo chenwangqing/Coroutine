@@ -279,7 +279,7 @@ static void *RUNTask_Init(void *obj)
 
 
     static int num        = 0;
-    int        stack_size = 1024 * 16;
+    int        stack_size = 1024 * 32;
 
     GO[stack_size]()
     {
