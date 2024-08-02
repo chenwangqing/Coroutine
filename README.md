@@ -19,8 +19,7 @@
 
 | 平台          | 编译器 |
 | ------------- | ------ |
-| Windows x86   | MSVC   |
-| Linux x64     | gcc    |
+| Linux         | gcc    |
 | Arm Cortex-M3 | ARMCC  |
 
 ## 使用示例

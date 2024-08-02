@@ -335,7 +335,7 @@
             <v6Rtti>0</v6Rtti>
             <VariousControls>
               <MiscControls></MiscControls>
-              <Define>USE_STDPERIPH_DRIVER COROUTINE_CHECK_STACK=1</Define>
+              <Define>USE_STDPERIPH_DRIVER COROUTINE_CHECK_STACK=1 COROUTINE_BLOCK_CRITICAL_SECTION=0</Define>
               <Undefine></Undefine>
               <IncludePath>.\LIB\HC32F10x_StdPeriph_Driver\inc;.\LIB\CMSIS\CM3\CoreSupport;.\LIB\CMSIS\CM3\DeviceSupport\HC\HC32F10x;..\HC32F103;..\..\src</IncludePath>
             </VariousControls>
@@ -570,6 +570,16 @@
               <FileName>RBTree.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\src\RBTree.c</FilePath>
+            </File>
+            <File>
+              <FileName>Print.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\src\Print.c</FilePath>
+            </File>
+            <File>
+              <FileName>Print.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\src\Print.h</FilePath>
             </File>
           </Files>
         </Group>

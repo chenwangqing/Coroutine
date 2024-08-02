@@ -4,7 +4,7 @@
 #include "NodeLink.h"
 #include "Coroutine.Platform.h"
 #if COROUTINE_BLOCK_CRITICAL_SECTION
-#include <stdatomic.h>
+#include "stdatomic.h"
 #endif
 
 typedef int STACK_TYPE;   // 栈类型
@@ -36,7 +36,7 @@ typedef struct _CO_Channel_Data_Node ChannelDataNode;   // 管道数据节点
 #if COROUTINE_BLOCK_CRITICAL_SECTION
 typedef atomic_int CO_APP_CS[1];   // 临界区
 #else
-typedef int CO_APP_CS[0];
+typedef int CO_APP_CS[1];
 #endif
 
 /**
@@ -293,7 +293,7 @@ static struct
 static void DeleteMessage(Coroutine_MailData *dat);
 #endif
 static Coroutine_Handle Coroutine_Create(size_t);
-static CO_Thread *      GetCurrentThread(int, bool);
+static CO_Thread *      _GetCurrentThread(int, bool);
 static void             Coroutine_Register_Task_Run(void);
 static void             AddTaskList(CO_TCB *task, uint8_t new_pri);
 
@@ -844,7 +844,7 @@ static void _Switch(CO_TCB *n, jmp_buf *dst_env)
  */
 static void _Yield(CO_TCB *related)
 {
-    CO_Thread *coroutine = GetCurrentThread(-1, false);
+    CO_Thread *coroutine = _GetCurrentThread(-1, false);
     if (coroutine == NULL || coroutine->idx_task == NULL)
         return;
     // 检查后续相关
@@ -926,7 +926,7 @@ static inline void CO_APP_LEAVE(CO_APP_CS cs)
  * @author   CXS (chenxiangshu@outlook.com)
  * @date     2024-06-28
  */
-static CO_Thread *GetCurrentThread(int co_idx, bool isAlloc)
+static CO_Thread *_GetCurrentThread(int co_idx, bool isAlloc)
 {
     size_t     id  = Inter.GetThreadId();
     CO_Thread *ret = NULL;
@@ -994,7 +994,7 @@ static CO_Thread *GetCurrentThread(int co_idx, bool isAlloc)
  */
 static bool Coroutine_RunTick(uint32_t timeout)
 {
-    CO_Thread *coroutine = GetCurrentThread(-1, true);
+    CO_Thread *coroutine = _GetCurrentThread(-1, true);
     if (coroutine == NULL)
         return false;
     _Task(coroutine, timeout);
@@ -1053,7 +1053,7 @@ static Coroutine_TaskId AddTask(Coroutine_Task    func,
     n->stack[0]                  = STACK_SENTRY_END;
     n->stack[n->stack_alloc - 1] = STACK_SENTRY_START;
     // 添加到任务列表
-    CO_Thread *c  = GetCurrentThread(-1, false);
+    CO_Thread *c  = _GetCurrentThread(-1, false);
     n->execv_time = Inter.GetMillisecond();
     CO_EnterCriticalSection();
     CM_NodeLink_Insert(&C_Static.task_list, CM_NodeLink_End(C_Static.task_list), &n->task_list_link);
@@ -1088,21 +1088,21 @@ static Coroutine_TaskId Coroutine_AddTask(Coroutine_Task    func,
  */
 static Coroutine_TaskId Coroutine_GetTaskId(void)
 {
-    CO_Thread *coroutine = GetCurrentThread(-1, false);
+    CO_Thread *coroutine = _GetCurrentThread(-1, false);
     return coroutine == NULL ? NULL : coroutine->idx_task;
 }
 
 static uint16_t GetCurrentCoroutineIdx(void)
 {
-    CO_Thread *coroutine = GetCurrentThread(-1, false);
+    CO_Thread *coroutine = _GetCurrentThread(-1, false);
     return coroutine == NULL ? -1 : coroutine->co_id;
 }
 
-static size_t GetThreadId(uint16_t co_id)
+static size_t _GetThreadId(uint16_t co_id)
 {
     if (co_id >= Inter.thread_count)
         return (size_t)-1;
-    CO_Thread *coroutine = GetCurrentThread(co_id, false);
+    CO_Thread *coroutine = _GetCurrentThread(co_id, false);
     return coroutine == NULL ? (size_t)-1 : coroutine->ThreadId;
 }
 
@@ -1131,7 +1131,7 @@ static uint32_t Coroutine_YieldTimeOut(uint32_t timeout)
         return 0;
     }
     uint64_t   ts        = Inter.GetMillisecond();
-    CO_Thread *coroutine = GetCurrentThread(-1, false);
+    CO_Thread *coroutine = _GetCurrentThread(-1, false);
     // 设置超时时间
     CO_EnterCriticalSection();
     CO_SET_TASK_TIME(coroutine->idx_task, timeout);
@@ -1299,7 +1299,7 @@ static bool SendMail(Coroutine_Mailbox mb,
     }
     if (dat == NULL) {
         CO_APP_LEAVE(mb->cs);
-        if (GetCurrentThread(-1, false))
+        if (_GetCurrentThread(-1, false))
             _Yield(related);   // 转移控制权
         else {
             CO_APP_EnterCriticalSection();
@@ -1360,7 +1360,7 @@ static Coroutine_MailResult ReceiveMail(Coroutine_Mailbox mb,
 {
     Coroutine_MailResult ret;
     CM_ZERO(&ret);
-    CO_Thread *c = GetCurrentThread(-1, false);
+    CO_Thread *c = _GetCurrentThread(-1, false);
     if (c == NULL || c->idx_task == NULL || mb == NULL)
         return ret;
     CO_TCB *      task = c->idx_task;
@@ -1865,7 +1865,7 @@ static void GiveSemaphore(Coroutine_Semaphore _sem, uint32_t val)
         CO_APP_LeaveCriticalSection();
     }
     if (isOk) {
-        if (GetCurrentThread(-1, false))
+        if (_GetCurrentThread(-1, false))
             _Yield(NULL);   // 转移控制权
         else
             CheckAndWakeIdleThread();   // 唤醒线程
@@ -1888,7 +1888,7 @@ static bool WaitSemaphore(Coroutine_Semaphore _sem, uint32_t val, uint32_t timeo
     if (val == 0)
         return true;
     CO_Semaphore *sem = (CO_Semaphore *)_sem;
-    CO_Thread *   c   = GetCurrentThread(-1, false);
+    CO_Thread *   c   = _GetCurrentThread(-1, false);
     if (sem == NULL || c == NULL || c->idx_task == NULL)
         return false;
     CO_TCB *      task = c->idx_task;
@@ -1989,7 +1989,7 @@ static void DeleteMutex(Coroutine_Mutex mutex)
 
 static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
 {
-    CO_Thread *c = GetCurrentThread(-1, false);
+    CO_Thread *c = _GetCurrentThread(-1, false);
     if (mutex == NULL || c == NULL || c->idx_task == NULL)
         return false;
     CO_TCB *      task = c->idx_task;
@@ -2061,7 +2061,7 @@ static bool LockMutex(Coroutine_Mutex mutex, uint32_t timeout)
 
 static void UnlockMutex(Coroutine_Mutex mutex)
 {
-    CO_Thread *c = GetCurrentThread(-1, false);
+    CO_Thread *c = _GetCurrentThread(-1, false);
     if (mutex == NULL || c == NULL || c->idx_task == NULL)
         return;
     CO_TCB *task    = c->idx_task;
@@ -2282,7 +2282,7 @@ static void *ASyncGetResultAndDelete(Coroutine_ASync async_ptr)
 #if COROUTINE_ENABLE_WATCHDOG
 static void FeedDog(uint32_t time)
 {
-    CO_Thread *c = GetCurrentThread(-1, false);
+    CO_Thread *c = _GetCurrentThread(-1, false);
     if (c == NULL || c->idx_task == NULL)
         return;
     CO_TCB *task = c->idx_task;
@@ -2374,7 +2374,7 @@ static bool WriteChannel(Coroutine_Channel ch, uint64_t data, uint32_t timeout)
 {
     if (ch == NULL)
         return false;
-    CO_Thread *c = GetCurrentThread(-1, false);
+    CO_Thread *c = _GetCurrentThread(-1, false);
     if (c == NULL || c->idx_task == NULL)
         return false;
     CO_TCB *        task    = c->idx_task;
@@ -2451,7 +2451,7 @@ static bool ReadChannel(Coroutine_Channel ch, uint64_t *data, uint32_t timeout)
 {
     if (ch == NULL || data == NULL)
         return false;
-    CO_Thread *c = GetCurrentThread(-1, false);
+    CO_Thread *c = _GetCurrentThread(-1, false);
     if (c == NULL || c->idx_task == NULL)
         return false;
     CO_TCB *        task    = c->idx_task;
@@ -2663,7 +2663,7 @@ const _Coroutine Coroutine = {
     Coroutine_AddTask,
     Coroutine_GetTaskId,
     GetCurrentCoroutineIdx,
-    GetThreadId,
+    _GetThreadId,
     Coroutine_Yield,
     Coroutine_YieldTimeOut,
     Coroutine_RunTick,

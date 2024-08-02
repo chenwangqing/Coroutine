@@ -90,7 +90,7 @@ extern "C" {
 
 // 临界区保护
 #ifndef COROUTINE_BLOCK_CRITICAL_SECTION
-#if defined(__linux__) || defined(__windows__)
+#if defined(__linux__) || defined(WIN32)
 #define COROUTINE_BLOCK_CRITICAL_SECTION 1   // 0: 全局临界区保护（临界区会重入），1: 分块临界区保护
 #else
 #define COROUTINE_BLOCK_CRITICAL_SECTION 0
@@ -134,7 +134,7 @@ extern "C" {
 // 优点：切换速度快
 // 缺点：占用内存大，容易造成栈溢出，某个任务都需要分配较大的栈空间
 
-#define COROUTINE_VERSION "1.20"
+#define COROUTINE_VERSION "1.23"
 
 typedef struct _CO_Thread *   Coroutine_Handle;      // 协程实例
 typedef struct _CO_TCB *      Coroutine_TaskId;      // 任务id
