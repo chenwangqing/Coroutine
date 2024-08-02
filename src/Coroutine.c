@@ -1460,6 +1460,7 @@ static int _PrintInfoTask(char *   buf,
         if (p->isRuning && ts > p->run_start_time)
             p_run_time += ts - p->run_start_time;   // 任务正在运行
         if (tv < p_run_time) tv = p_run_time;
+        if (tv == 0) tv = 1;
         len = co_snprintf(time,
                           sizeof(time),
                           "%llu(%d%%)",
