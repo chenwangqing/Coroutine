@@ -21,7 +21,7 @@
 // --------------------------------------------------------------------------------------
 
 #define CONTEXT_JMP      1   // setjmp / longjmp
-#define CONTEXT_UCONTEXT 2   // getcontext / setcontext
+#define CONTEXT_UCONTEXT 2   // getcontext / swapcontext
 
 // 上下文切换模式
 #if defined(__linux__)

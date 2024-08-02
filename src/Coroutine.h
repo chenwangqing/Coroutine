@@ -88,13 +88,18 @@ while (true)
 extern "C" {
 #endif
 
+// 临界区保护
+#ifndef COROUTINE_BLOCK_CRITICAL_SECTION
+#if defined(__linux__) || defined(__windows__)
+#define COROUTINE_BLOCK_CRITICAL_SECTION 1   // 0: 全局临界区保护（临界区会重入），1: 分块临界区保护
+#else
+#define COROUTINE_BLOCK_CRITICAL_SECTION 0
+#endif
+#endif
+
 // 任务调度时进行栈检查，会增加调度时间开销但能及时发现栈溢出的错误，适用于开发阶段
 #ifndef COROUTINE_CHECK_STACK
 #define COROUTINE_CHECK_STACK 0
-#endif
-// 临界区保护
-#ifndef COROUTINE_BLOCK_CRITICAL_SECTION
-#define COROUTINE_BLOCK_CRITICAL_SECTION 1   // 0: 全局临界区保护（临界区会重入），1: 分块临界区保护
 #endif
 // 启用邮箱
 #ifndef COROUTINE_ENABLE_MAILBOX
@@ -228,35 +233,19 @@ typedef struct
 {
     size_t thread_count;   // 线程数量
 
-#if COROUTINE_BLOCK_CRITICAL_SECTION
-    /**
-     * @brief    创建临界
-     * @author   CXS (chenxiangshu@outlook.com)
-     * @date     2024-07-13
-     */
-    void *(*CreateCriticalSection)(void);
-
-    /**
-     * @brief    删除临界
-     * @author   CXS (chenxiangshu@outlook.com)
-     * @date     2024-07-13
-     */
-    void (*DeleteCriticalSection)(void *cs);
-#endif
-
     /**
      * @brief    进入临界保护
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-26
      */
-    void (*EnterCriticalSection)(void *cs, const char *file, int line);
+    void (*EnterCriticalSection)(const char *file, int line);
 
     /**
      * @brief    推出临界保护
      * @author   CXS (chenxiangshu@outlook.com)
      * @date     2024-06-26
      */
-    void (*LeaveCriticalSection)(void *cs, const char *file, int line);
+    void (*LeaveCriticalSection)(const char *file, int line);
 
     /**
      * @brief    内存分配

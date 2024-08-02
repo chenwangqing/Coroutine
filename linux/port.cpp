@@ -49,6 +49,14 @@ struct
 } memory;
 
 void *memory_critical_section = nullptr;
+void *critical_section        = nullptr;
+
+static uint64_t GetMillisecond()
+{
+    struct timeval ts = {0};
+    gettimeofday(&ts, NULL);
+    return ts.tv_sec * 1000 + (ts.tv_usec / 1000);
+}
 
 static void *__CreateLock(void)
 {
@@ -58,56 +66,51 @@ static void *__CreateLock(void)
     return lock;
 }
 
-static void __DestroyLock(void *obj)
-{
-    Mutex_t *lock = (Mutex_t *)(obj);
-    pthread_mutex_destroy(&lock->obj);
-    delete lock;
-    return;
-}
+// static void __DestroyLock(void *obj)
+// {
+//     Mutex_t *lock = (Mutex_t *)(obj);
+//     pthread_mutex_destroy(&lock->obj);
+//     delete lock;
+//     return;
+// }
 
-static void __Lock(void *obj, const char *file, int line)
+static void __Lock(const char *file, int line)
 {
-    Mutex_t *lock = (Mutex_t *)(obj);
+    Mutex_t *lock = (Mutex_t *)(critical_section);
     pthread_mutex_lock((pthread_mutex_t *)&(lock->obj));
     return;
 }
 
-static void __UnLock(void *obj, const char *file, int line)
+static void __UnLock(const char *file, int line)
 {
-    Mutex_t *lock = (Mutex_t *)(obj);
+    Mutex_t *lock = (Mutex_t *)(critical_section);
     pthread_mutex_unlock((pthread_mutex_t *)&(lock->obj));
     return;
 }
 
 static void _Free(void *ptr, const char *file, int line)
 {
-    size_t *p = (size_t *)ptr;
+    Mutex_t *lock = (Mutex_t *)(memory_critical_section);
+    size_t  *p    = (size_t *)ptr;
     p--;
-    __Lock(memory_critical_section, __FILE__, __LINE__);
+    pthread_mutex_lock((pthread_mutex_t *)&(lock->obj));
     memory.used -= (*p) + sizeof(size_t);
-    __UnLock(memory_critical_section, __FILE__, __LINE__);
+    pthread_mutex_unlock((pthread_mutex_t *)&(lock->obj));
     free(p);
     return;
 }
 
 static void *_Malloc(size_t size, const char *file, int line)
 {
-    size_t *ptr = (size_t *)malloc(size + sizeof(size_t));
-    *ptr        = size;
-    __Lock(memory_critical_section, __FILE__, __LINE__);
+    Mutex_t *lock = (Mutex_t *)(memory_critical_section);
+    size_t  *ptr  = (size_t *)malloc(size + sizeof(size_t));
+    *ptr          = size;
+    pthread_mutex_lock((pthread_mutex_t *)&(lock->obj));
     memory.used += size + sizeof(size_t);
     if (memory.used > memory.max_used)
         memory.max_used = memory.used;
-    __UnLock(memory_critical_section, __FILE__, __LINE__);
+    pthread_mutex_unlock((pthread_mutex_t *)&(lock->obj));
     return ptr + 1;
-}
-
-static uint64_t GetMillisecond()
-{
-    struct timeval ts = {0};
-    gettimeofday(&ts, NULL);
-    return ts.tv_sec * 1000 + (ts.tv_usec / 1000);
 }
 
 static size_t GetThreadId(void)
@@ -131,7 +134,7 @@ void Sleep(uint32_t time)
     return;
 }
 
-#define MAX_THREADS 6
+#define MAX_THREADS 12
 
 class IdleNode {
 public:
@@ -216,10 +219,6 @@ static Coroutine_Events events = {
 
 static const Coroutine_Inter Inter = {
     MAX_THREADS,
-#if COROUTINE_BLOCK_CRITICAL_SECTION
-    __CreateLock,
-    __DestroyLock,
-#endif
     __Lock,
     __UnLock,
     _Malloc,
@@ -233,6 +232,7 @@ static const Coroutine_Inter Inter = {
 const Coroutine_Inter *GetInter(void)
 {
     memory_critical_section = __CreateLock();
+    critical_section        = __CreateLock();
     idle_node               = new IdleNode();
     return &Inter;
 }
