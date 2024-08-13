@@ -159,7 +159,7 @@ void Task5(void *obj)
 static void *RUNTask(void *obj)
 {
     while (true)
-        Coroutine.RunTick(1000);
+        Coroutine.RunTick(UINT32_MAX);
     return nullptr;
 }
 
@@ -250,7 +250,10 @@ void *RUNTask_Test(void *obj)
     }
 }
 
-COROUTINE_INIT_REG_TASK("Task1", Task1, NULL, 16 << 10);
+ COROUTINE_INIT_REG_TASK("Task1", Task1, NULL, 16 << 10);
+
+#define CH_NUM 4
+static Coroutine_TaskId task_ch1[CH_NUM * 2];
 
 static void *RUNTask_Init(void *obj)
 {
@@ -263,31 +266,36 @@ static void *RUNTask_Init(void *obj)
     static int num71      = 0;
     int        stack_size = 1024 * 32;
 
-    GO[stack_size]()
-    {
-        LOG_DEBUG("stack_size: %d\n", stack_size);
-    };
+    // GO[stack_size]()
+    // {
+    //     LOG_DEBUG("stack_size: %d\n", stack_size);
+    // };
 
-    Sleep(rand() % 1000);
-    Coroutine.AddTask(Task2, nullptr, TASK_PRI_NORMAL, stack_size, "Task2", nullptr);
-    Sleep(rand() % 1000);
-    Coroutine.AddTask(Task3, nullptr, TASK_PRI_NORMAL, stack_size, "Task3", nullptr);
-    Sleep(rand() % 1000);
+    // Sleep(rand() % 1000);
+    // Coroutine.AddTask(Task2, nullptr, TASK_PRI_NORMAL, stack_size, "Task2", nullptr);
+    // Sleep(rand() % 1000);
+    // Coroutine.AddTask(Task3, nullptr, TASK_PRI_NORMAL, stack_size, "Task3", nullptr);
+    // Sleep(rand() % 1000);
 
-    Coroutine.AddTask(Task4, nullptr, TASK_PRI_NORMAL, stack_size, "Task4", nullptr);
-    Sleep(rand() % 1000);
-    Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-1", nullptr);
-    Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-2", nullptr);
+    // Coroutine.AddTask(Task4, nullptr, TASK_PRI_NORMAL, stack_size, "Task4", nullptr);
+    // Sleep(rand() % 1000);
+    // Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-1", nullptr);
+    // Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-2", nullptr);
 
-    Coroutine.AddTask(Task7, nullptr, TASK_PRI_NORMAL, stack_size, "Task7", nullptr);
+    // Coroutine.AddTask(Task7, nullptr, TASK_PRI_NORMAL, stack_size, "Task7", nullptr);
     // Coroutine.AddTask(Task71, &num71, TASK_PRI_NORMAL, stack_size, "Task71", nullptr);
 
-    for (int i = 0; i < 5; i++) {
+
+    for (int i = 0; i < CH_NUM; i++) {
         Coroutine_Channel ch = Coroutine.CreateChannel("ch", 0);
-        Coroutine.AddTask(Task_Channel_1, ch, TASK_PRI_NORMAL, stack_size, "Channel-1", nullptr);
-        Coroutine.AddTask(Task_Channel_2, ch, TASK_PRI_NORMAL, stack_size, "Channel-2", nullptr);
+        Coroutine.AddTask(Task_Channel_1, ch, TASK_PRI_NORMAL, stack_size, "Channel-1", &task_ch1[i * 2 + 0]);
+        Coroutine.AddTask(Task_Channel_2, ch, TASK_PRI_NORMAL, stack_size, "Channel-2", &task_ch1[i * 2 + 1]);
     }
 
+    extern const Coroutine_Inter *GetInter(void);
+    auto                          inter = GetInter();
+    for (size_t i = 0; i < inter->thread_count; i++)
+        RunTask(RUNTask, nullptr);
     return nullptr;
 }
 
@@ -298,9 +306,6 @@ int main()
     extern const Coroutine_Inter *GetInter(void);
     auto                          inter = GetInter();
     Coroutine.SetInter(inter);
-
-    for (size_t i = 0; i < inter->thread_count; i++)
-        RunTask(RUNTask, nullptr);
 
     RunTask(RUNTask_Init, nullptr);   // 初始化任务
 

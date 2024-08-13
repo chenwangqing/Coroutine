@@ -55,7 +55,8 @@ static uint64_t GetMillisecond()
 {
     struct timeval ts = {0};
     gettimeofday(&ts, NULL);
-    return ts.tv_sec * 1000 + (ts.tv_usec / 1000);
+    uint64_t now = ts.tv_sec * 1000 + (ts.tv_usec / 1000);
+    return now;
 }
 
 static void *__CreateLock(void)
@@ -134,13 +135,15 @@ void Sleep(uint32_t time)
     return;
 }
 
-#define MAX_THREADS 12
+#define MAX_THREADS 5
 
 class IdleNode {
 public:
     pthread_cond_t  g_cond;
     pthread_mutex_t g_mutex;
-    volatile int    isWait = 0;
+    volatile int    isWait      = 0;
+    volatile int    sleep_count = 0;
+    volatile int    waked_count = 0;
 
     IdleNode()
     {
@@ -164,6 +167,7 @@ public:
         outtime.tv_nsec = now.tv_usec * 1000;
         pthread_mutex_lock(&g_mutex);
         isWait++;
+        sleep_count++;
         pthread_cond_timedwait(&g_cond, &g_mutex, &outtime);
         isWait--;
         pthread_mutex_unlock(&g_mutex);
@@ -173,8 +177,8 @@ public:
     void WeakUp()
     {
         pthread_mutex_lock(&g_mutex);
-        if (isWait > 0)
-            pthread_cond_signal(&g_cond);
+        pthread_cond_signal(&g_cond);
+        waked_count++;
         pthread_mutex_unlock(&g_mutex);
         return;
     }
