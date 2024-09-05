@@ -250,7 +250,7 @@ void *RUNTask_Test(void *obj)
     }
 }
 
- COROUTINE_INIT_REG_TASK("Task1", Task1, NULL, 16 << 10);
+COROUTINE_INIT_REG_TASK("Task1", Task1, NULL, 16 << 10);
 
 #define CH_NUM 4
 static Coroutine_TaskId task_ch1[CH_NUM * 2];
@@ -271,16 +271,16 @@ static void *RUNTask_Init(void *obj)
     //     LOG_DEBUG("stack_size: %d\n", stack_size);
     // };
 
-    // Sleep(rand() % 1000);
-    // Coroutine.AddTask(Task2, nullptr, TASK_PRI_NORMAL, stack_size, "Task2", nullptr);
-    // Sleep(rand() % 1000);
-    // Coroutine.AddTask(Task3, nullptr, TASK_PRI_NORMAL, stack_size, "Task3", nullptr);
-    // Sleep(rand() % 1000);
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(Task2, nullptr, TASK_PRI_NORMAL, stack_size, "Task2", nullptr);
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(Task3, nullptr, TASK_PRI_NORMAL, stack_size, "Task3", nullptr);
+    Sleep(rand() % 1000);
 
-    // Coroutine.AddTask(Task4, nullptr, TASK_PRI_NORMAL, stack_size, "Task4", nullptr);
-    // Sleep(rand() % 1000);
-    // Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-1", nullptr);
-    // Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-2", nullptr);
+    Coroutine.AddTask(Task4, nullptr, TASK_PRI_NORMAL, stack_size, "Task4", nullptr);
+    Sleep(rand() % 1000);
+    Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-1", nullptr);
+    Coroutine.AddTask(Task5, &num, TASK_PRI_NORMAL, stack_size, "Task5-2", nullptr);
 
     // Coroutine.AddTask(Task7, nullptr, TASK_PRI_NORMAL, stack_size, "Task7", nullptr);
     // Coroutine.AddTask(Task71, &num71, TASK_PRI_NORMAL, stack_size, "Task71", nullptr);
@@ -299,9 +299,25 @@ static void *RUNTask_Init(void *obj)
     return nullptr;
 }
 
+#include "libTest.h"
+#include "Hook.h"
+
+void *my_malloc(size_t __size)
+{
+    printf("malloc: %u bytes\n", __size);
+    return malloc(__size);
+}
+
 int main()
 {
     setbuf(stdout, NULL);
+
+    Hook_Init();
+    Hook_ReadyRegister();
+    Hook_Register("*", "malloc", (void *)my_malloc);
+
+    say_hello();
+
 
     extern const Coroutine_Inter *GetInter(void);
     auto                          inter = GetInter();

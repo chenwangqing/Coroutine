@@ -68,6 +68,8 @@
         "ratio": "cpp",
         "sstream": "cpp",
         "ucontext.h": "c",
-        "coroutine.platform.h": "c"
+        "coroutine.platform.h": "c",
+        "stdbool.h": "c",
+        "regex.h": "c"
     },
 }

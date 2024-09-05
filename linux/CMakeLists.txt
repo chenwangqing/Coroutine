@@ -58,8 +58,11 @@ set(CODE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/NodeLink.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/RBTree.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/Print.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/Coroutine_Hook_Linux.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/Coroutine_Hook_Linux.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/Hook.c)
 
+
+set(EXTRA_LIBS ${EXTRA_LIBS}  ${CMAKE_CURRENT_SOURCE_DIR}/build/libtest.so)
 
 # ------------------------------------- 编译 --------------------------------------
 message("CMAKE_C_COMPILER=${CMAKE_C_COMPILER}")

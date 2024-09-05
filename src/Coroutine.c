@@ -191,7 +191,6 @@ struct _CO_Thread
 {
     jmp_buf  env;               // 环境
     uint8_t  isRun : 1;         // 运行
-    uint8_t  isSleep : 1;       // 休眠
     uint8_t  _get_idx;          //
     uint16_t co_id;             // 协程id
     CO_TCB * idx_task;          // 当前任务
@@ -470,7 +469,9 @@ static bool CheckAndWakeIdleThread(CO_Thread *c)
 {
     int wakes    = 0;
     int SleepNum = C_Static.SleepNum;
-    if (SleepNum == 0 || c->run_count == c->wake_count)
+    if (c->run_count == c->wake_count)
+        return false;
+    if (SleepNum == 0)
         return true;
     bool isOk = false;
     CO_APP_ENTER(c->cs);
@@ -600,7 +601,6 @@ static void AddTaskList(CO_TCB *task, uint64_t now)
         return;
     // 移除任务列表
     bool isRun = task->isDel || task->execv_time <= now;
-    DelTaskList(task);
     if (isRun) {
         _Add_RunList(task, now);
     } else {
@@ -621,39 +621,26 @@ static uint32_t GetSleepTask(uint64_t ts)
 {
     if (C_Static.idx_sleep == NULL)
         return UINT32_MAX;
-    uint32_t tv   = UINT32_MAX;
-    CO_TCB * ret  = NULL;
-    bool     isOK = false;
-    while (NULL == ret && !isOK) {
-        CO_APP_ENTER(C_Static.cs_sleep);
-        CO_TCB *   task = (CO_TCB *)C_Static.idx_sleep;
-        CO_Thread *c    = task ? task->coroutine : NULL;
-        CO_APP_LEAVE(C_Static.cs_sleep);
-        if (c == NULL)
-            return UINT32_MAX;
-        CO_APP_ENTER(c->cs);
-        CO_APP_ENTER(C_Static.cs_sleep);
-        if (C_Static.idx_sleep == task) {
-            isOK = true;
-            if (ts < task->execv_time) {
-                tv  = task->execv_time - ts;
-                ret = NULL;
-            } else
-                ret = _Del_SleepList(task);
-        }
-        CO_APP_LEAVE(C_Static.cs_sleep);
-        if (ret) {
-            if (ret->coroutine != c) {
-                tv = 0;
-            }
-            _Add_RunList(ret, ts);
-            tv = 0;
-        }
-        CO_APP_LEAVE(c->cs);
+    uint32_t tv  = UINT32_MAX;
+    CO_TCB * ret = NULL;
+    CO_APP_ENTER(C_Static.cs_sleep);
+    ret = (CO_TCB *)C_Static.idx_sleep;
+    if (ret) {
+        if (ts < ret->execv_time) {
+            tv  = ret->execv_time - ts;
+            ret = NULL;
+        } else
+            ret = _Del_SleepList(ret);
     }
-    if (ret)
-        CheckAndWakeIdleThread(ret->coroutine);
-    return tv;
+    CO_APP_LEAVE(C_Static.cs_sleep);
+    if (ret == NULL)
+        return tv;
+    CO_Thread *c = ret->coroutine;
+    CO_APP_ENTER(c->cs);
+    _Add_RunList(ret, ts);
+    CO_APP_LEAVE(c->cs);
+    CheckAndWakeIdleThread(c);
+    return 0;
 }
 
 static void ReadyRun(CO_Thread *coroutine, CO_TCB *task)
@@ -681,12 +668,8 @@ static CO_TCB *GetRunTask(uint16_t co_id, CO_Thread *coroutine)
     for (uint16_t i = 0; i < Inter.thread_count && task == NULL; i++, co_id++) {
         if (co_id >= Inter.thread_count) co_id = 0;
         CO_Thread *c = C_Static.coroutines[co_id];
-        if (c->run_tasks == NULL) continue;
         CO_APP_ENTER(c->cs);
         if (c->run_tasks) {
-            if (c->run_count == 0) {
-                c->run_count = 0;
-            }
             task               = CM_Field_ToType(CO_TCB, run_link, CM_NodeLink_First(c->run_tasks));
             task->isAddRunList = 0;
             CM_NodeLink_Remove(&c->run_tasks, &task->run_link);
@@ -813,7 +796,6 @@ static void _Task(CO_Thread *coroutine, uint32_t timeout)
         if (_co_id == coroutine->co_id)
             isSleep = false;   // 延迟ms后再次检查是否有任务
     }
-    coroutine->isSleep = isSleep;
     if (isSleep) {
         if (_co_id == coroutine->co_id)
             _co_id = 0xFFFF;
@@ -832,7 +814,6 @@ static void _Task(CO_Thread *coroutine, uint32_t timeout)
             // 执行空闲事件
             Inter.events->Idle(sleep_ms - 1, Inter.events->object);
             // 空闲唤醒
-            coroutine->isSleep = 0;
             CO_EnterCriticalSection();
             C_Static.SleepNum--;
             CO_LeaveCriticalSection();
@@ -846,8 +827,6 @@ static void _Task(CO_Thread *coroutine, uint32_t timeout)
     }
     if (_co_id == coroutine->co_id)
         _co_id = 0xFFFF;
-    // 检查后续任务
-    CheckAndWakeIdleThread(coroutine);
 #if COROUTINE_ENABLE_PRINT_INFO
     // 记录切换次数
     coroutine->schedule_count++;
@@ -857,9 +836,7 @@ static void _Task(CO_Thread *coroutine, uint32_t timeout)
     // 执行任务
     _enter_into(n);
     // 线程空闲
-    CO_APP_ENTER(coroutine->cs);
-    coroutine->idx_task = NULL;   // 控制器空闲
-    CO_APP_LEAVE(coroutine->cs);
+    coroutine->idx_task        = NULL;   // 控制器空闲
     now                        = GetMillisecond();
     coroutine->task_start_time = now;
 #if COROUTINE_ENABLE_PRINT_INFO
@@ -870,9 +847,6 @@ static void _Task(CO_Thread *coroutine, uint32_t timeout)
         DeleteTask(n);   // 任务已删除
     } else {
         CO_APP_ENTER(coroutine->cs);
-        if (n->coroutine != coroutine) {
-            n->isRuning = 0;
-        }
         // 清除运行标志
         n->isRuning = 0;
         // 加入任务列表
@@ -963,10 +937,16 @@ static void _Yield(CO_TCB *related)
     bool     isSwitch = n->isDel || n->execv_time > now;
     // 检查后续相关
     if (related) {
+        if (isSwitch) {
+            // 将协程控制器让给相关协程
+            related->coroutine = coroutine;
+        }
         CO_Thread *c = related->coroutine;
         CO_APP_ENTER(c->cs);
         AddTaskList(related, now);
         CO_APP_LEAVE(c->cs);
+        if (c != coroutine)
+            CheckAndWakeIdleThread(c);
     }
     // 检查是否需要切换
     {

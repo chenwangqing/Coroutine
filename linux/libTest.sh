@@ -1,0 +1,1 @@
+gcc libTest.c -shared -fPIC -o ./build/libtest.so
